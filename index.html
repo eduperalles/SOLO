@@ -488,7 +488,7 @@
             </button>
             
             <h2 style="color: var(--primary); text-align: center; margin-bottom: 1.5rem;">Finalizar Pedido</h2>
-            <p style="text-align: center; margin-bottom: 1.5rem; color: #666;">Solicitamos 48hs de antecedência para encomendas. A confirmação do Pedido e o valor do frete serão informados via WhatsApp da loja.</p>
+            <p style="text-align: center; margin-bottom: 1.5rem; color: #666;">Solicitamos 48hs de antecedência para encomendas. A confirmação do pedido e o valor do frete serão informados via WhatsApp da loja.</p>
             
             <div class="form-group">
                 <label>Seu Nome *</label>
@@ -1004,7 +1004,7 @@
             message += `\n-----------------------------------\n`;
             message += `*TOTAL A PAGAR: R$ ${totalValue.toFixed(2).replace('.', ',')}*\n`;
             message += `-----------------------------------\n`;
-            message += `_Aguardo confirmação e chave PIX._`;
+            message += `_Aguardo confirmação, valor do frete e chave PIX._`;
 
             window.open(`https://wa.me/5519993835111?text=${encodeURIComponent(message)}`, '_blank');
             closeCheckoutModal();
