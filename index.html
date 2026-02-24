@@ -14,7 +14,6 @@
     <meta property="og:type" content="website">
     <meta property="og:locale" content="pt_BR">
 	
-	<!-- ICOFONT -->
 	<link rel="icon" type="image/png" href="../WEBSITE PERALLY/icofont.png">
 
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -172,7 +171,10 @@
             padding: 1.5rem 0; border-bottom: 1px solid #eee; gap: 1rem;
         }
         .item-info { display: flex; align-items: flex-start; gap: 1rem; flex: 1; }
-        .item-thumb { width: 90px; height: 90px; border-radius: 4px; object-fit: cover; border: 1px solid #eee; flex-shrink: 0; }
+        
+        /* ATUALIZAÇÃO: Miniatura de item agora vira botão/link interativo */
+        .item-thumb { width: 90px; height: 90px; border-radius: 4px; object-fit: cover; border: 1px solid #eee; flex-shrink: 0; cursor: pointer; transition: var(--transition); }
+        .item-thumb:hover { transform: scale(1.05); border-color: var(--accent-gold); box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         
         .item-text { display: flex; flex-direction: column; }
         .item-text h4 { color: var(--primary); font-size: 1.1rem; margin-bottom: 0.2rem; font-weight: 600; }
@@ -188,6 +190,25 @@
         }
         .qty-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
         .qty-display { font-weight: 600; font-size: 1rem; width: 20px; text-align: center; }
+
+        /* --- Lightbox de Imagem Ampliada --- */
+        .image-lightbox {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 4000; justify-content: center; align-items: center;
+            backdrop-filter: blur(5px);
+        }
+        .lightbox-content {
+            width: 70%; /* Ocupa 70% da tela conforme solicitado */
+            max-height: 90vh; /* Garante que não ultrapasse a altura da tela */
+            object-fit: contain; border-radius: 4px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            animation: fadeIn 0.3s ease;
+        }
+        .lightbox-close {
+            position: absolute; top: 20px; right: 30px; color: white; font-size: 3rem;
+            font-weight: 300; cursor: pointer; transition: var(--transition); z-index: 4001;
+            background: none; border: none; line-height: 1;
+        }
+        .lightbox-close:hover { color: var(--accent-gold); transform: scale(1.1); }
 
         /* --- Toast & Floating --- */
         .toast {
@@ -293,7 +314,8 @@
             #scrollTopBtn { bottom: 20px; right: 20px; padding: 10px; font-size: 16px; }
             .menu-grid { grid-template-columns: 1fr; }
             .delivery-options { flex-direction: column; gap: 0.5rem; }
-            .bistro-grid { display: flex; flex-direction: column-reverse; } /* Imagem acima do texto no mobile */
+            .bistro-grid { display: flex; flex-direction: column-reverse; } 
+            .lightbox-content { width: 90%; } /* Ajuste no mobile para não ficar tão pequeno */
         }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -481,6 +503,11 @@
         VER CARRINHO
     </div>
 
+    <div class="image-lightbox" id="imageLightbox">
+        <button class="lightbox-close" onClick="closeImageLightbox()">&times;</button>
+        <img class="lightbox-content" id="lightboxImg" src="" alt="Imagem Ampliada">
+    </div>
+
     <div class="modal" id="checkoutModal">
         <div class="auth-container">
             <button class="custom-close-btn" onClick="closeCheckoutModal()" style="top: 10px; right: 10px; width: 35px; height: 35px; font-size: 1rem;">
@@ -655,43 +682,55 @@
             document.getElementById('rightClickModal').style.display = 'none';
         }
 
+        // --- FUNCIONALIDADE DE IMAGEM AMPLIADA ---
+        function openImageLightbox(src) {
+            document.getElementById('lightboxImg').src = src;
+            document.getElementById('imageLightbox').style.display = 'flex';
+        }
+
+        function closeImageLightbox() {
+            document.getElementById('imageLightbox').style.display = 'none';
+            document.getElementById('lightboxImg').src = ''; // Limpa a fonte ao fechar
+        }
+
         // --- ATUALIZAÇÃO DO FECHAMENTO AO CLICAR FORA (UNIFICADO) ---
         window.onclick = function(e) {
             if (e.target == document.getElementById('checkoutModal')) closeCheckoutModal();
             if (e.target == document.getElementById('categoryModal')) closeCategoryModal();
             if (e.target == document.getElementById('rightClickModal')) closeRightClickModal();
             if (e.target == document.getElementById('bistroModal')) closeBistroModal();
+            if (e.target == document.getElementById('imageLightbox')) closeImageLightbox(); // Fecha o visualizador se clicar fora da foto
         }
         
         // --- DADOS ---
         const readyMadeCategories = [
             {
                 id: 'frios',
-                name: 'Queijos, Frios & Charcutaria',
-                img: 'https://www.seara.com.br/wp-content/uploads/2025/09/charcutaria_capa.webp',
+                name: 'Queijos, Frios & Charcutaria', 
+                img: 'capa_charcutaria.jpg',
                 items: [
-                    { id: 101, name: "SOLO Afeto", desc: "Composição: Palitos de queijo parmesão, queijo gouda, salame, tomate cereja, provolone com orégano, presunto italiano, uvas roxas sem sementes.", price: 30.00, img: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYD_FAt7WLotWqsyvod75X_JMVJJHRH7m_8A&s" },
-                    { id: 102, name: "SOLO Essencial", desc: "Composição: Palitos de queijo parmesão, queijo gouda, queijo parmesão, presunto alemão, castanha de caju, ameixa, morango e figo.", price: 56.00, img: "https://charcutaria.org/wp-content/uploads/2017/03/salame.jpg" },
-                    { id: 107, name: "SOLO Conexão", desc: "Composição: Torradas, biscoito salgado, salame, queijo provolone com orégano, queijo minas com tomate cereja, presunto italiano, queijo bleu de bresse, damasco, castanha de caju, figo.", price: 98.00, img: "https://s2-cbn.glbimg.com/v4vPnbNKvzH6uemBrLXcHxcyde4=/0x0:1600x1066/924x0/smart/filters:strip_icc()/i.s3.glbimg.com/v1/AUTH_d975fad146a14bbfad9e763717b09688/internal_photos/bs/2024/Z/6/QLOhD2TQSrcuq9RYCT5w/queijo-1.jfif" },
-                    { id: 112, name: "SOLO Celebração", desc: "Composição: Queijo brie, queijo gouda, queijo provolone com orégano, tomate cereja, torradas, castanha de caju, peperoni, salame, presunto italiano, biscoito salgado, damasco, ameixa, uvas roxas, pão italiano, morango, figo, azeitonas.", price: 220.00, img: "https://images.tcdn.com.br/img/img_prod/1049139/provolone_defumado_aprox_280g_d_or_1240_1_b933c591f4b6eddc2cd5832709262f6f.jpg" }
+                    { id: 101, name: "SOLO Afeto", desc: "Composição: Palitos de queijo parmesão, queijo gouda, salame, tomate cereja, provolone com orégano, presunto italiano, uvas roxas sem sementes.", price: 30.00, img: "solo_afeto.jpg" },
+                    { id: 102, name: "SOLO Essencial", desc: "Composição: Palitos de queijo parmesão, queijo gouda, queijo parmesão, presunto alemão, castanha de caju, ameixa, morango e figo.", price: 56.00, img: "solo_essencial.jpg" },
+                    { id: 107, name: "SOLO Conexão", desc: "Composição: Torradas, biscoito salgado, salame, queijo provolone com orégano, queijo minas com tomate cereja, presunto italiano, queijo bleu de bresse, damasco, castanha de caju, figo.", price: 98.00, img: "solo_conexao.jpg" },
+                    { id: 112, name: "SOLO Celebração", desc: "Composição: Queijo brie, queijo gouda, queijo provolone com orégano, tomate cereja, torradas, castanha de caju, peperoni, salame, presunto italiano, biscoito salgado, damasco, ameixa, uvas roxas, pão italiano, morango, figo, azeitonas.", price: 220.00, img: "solo_celebracao.jpg" }
                 ]
             },
             {
                 id: 'cafe',
                 name: 'Café & Matinal',
-                img: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?q=80&w=2070&auto=format&fit=crop',
+                img: 'capa_cafe.jpg',
                 items: [
-                    { id: 104, name: "SOLO Alvorada", desc: "Composição: Biscoito mil folhas, pão de queijo waffle, biscoito com chocolate, salame, presunto italiano, provolone com orégano, uvas roxas sem semente, morango.", price: 60.00, img: "https://images.unsplash.com/photo-1585478259715-876a6a81fc08?q=80&w=2072&auto=format&fit=crop" },
-                    { id: 109, name: "SOLO Harmonia", desc: "Composição: Mini Nutella, Uvas roxas, Pão de queijo, palito de queijo parmesão, leque de mel em biju, biscoito mil folhas, torradas, presunto italiano, salame, presunto alemão, queijo gouda, queijo provolone com orégano, castanha de caju, biscoito de chocolate, mini pão francês, biscoito salgado, pão italiano, morangos, mini brownie, amêndoas com chocolate, figo roxo, damasco.", price: 195.00, img: "https://www.sabornamesa.com.br/media/k2/items/cache/96bf577e2682bc7925dad067c2022909_XL.jpg" }
+                    { id: 104, name: "SOLO Alvorada", desc: "Composição: Biscoito mil folhas, pão de queijo waffle, biscoito com chocolate, salame, presunto italiano, provolone com orégano, uvas roxas sem semente, morango.", price: 60.00, img: "solo_alvorada.jpg" },
+                    { id: 109, name: "SOLO Harmonia", desc: "Composição: Mini Nutella, Uvas roxas, Pão de queijo, palito de queijo parmesão, leque de mel em biju, biscoito mil folhas, torradas, presunto italiano, salame, presunto alemão, queijo gouda, queijo provolone com orégano, castanha de caju, biscoito de chocolate, mini pão francês, biscoito salgado, pão italiano, morangos, mini brownie, amêndoas com chocolate, figo roxo, damasco.", price: 195.00, img: "solo_harmonia.jpg" }
                 ]
             },
             {
                 id: 'doces',
                 name: 'Chocolates & Mais',
-                img: 'https://images.unsplash.com/photo-1549007994-cb92caebd54b?q=80&w=2070&auto=format&fit=crop',
+                img: 'capa_chocolate.jpg',
                 items: [
-                    { id: 103, name: "SOLO Melodia", desc: "Composição: Pelúcia de ursinho com coração, bombons de avelã, nutella B-ready, amêndoas de hocolate, leque de biju, biscoitos finos, bombom de pistache, ferrero rocher, biscoito mil folhas.", price: 85.00, img: "https://www.nacozinhadahelo.com.br/wp-content/uploads/2023/08/receita-de-geleia-de-pimenta.jpg" },
-                    { id: 106, name: "SOLO Love", desc: "Composição: Mini garrafa de espumante, biscoito mil folhas, biscoitos finos, castanha de caju, leque de biju, bombom de pistache, sticky de chocolate ao leite, amêndoas de chocolate, pelúcia de coração escrito “eu te amo”.", price: 150.00, img: "https://mst.org.br/wp-content/uploads/2020/08/castanhas19082019.jpg" }
+                    { id: 103, name: "SOLO Melodia", desc: "Composição: Pelúcia de ursinho com coração, bombons de avelã, nutella B-ready, amêndoas de hocolate, leque de biju, biscoitos finos, bombom de pistache, ferrero rocher, biscoito mil folhas.", price: 85.00, img: "solo_melodia.jpg" },
+                    { id: 106, name: "SOLO Love", desc: "Composição: Mini garrafa de espumante, biscoito mil folhas, biscoitos finos, castanha de caju, leque de biju, bombom de pistache, sticky de chocolate ao leite, amêndoas de chocolate, pelúcia de coração escrito “eu te amo”.", price: 150.00, img: "solo_love.jpg" }
                 ]
             },
             {
@@ -707,11 +746,10 @@
             {
                 id: 'veggie',
                 name: 'Veggie',
-                img: 'https://www.presentespara.com.br/wp-content/uploads/2024/06/veganos.webp',
+                img: 'capa_veggie.jpg',
                 items: [
-                    { id: 304, name: "Queijo Coalho (200g)", desc: "Para grelhar.", price: 25.00, img: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQXbe65eBGKdcC9kOdZFYP0vrVQm1qumYBD1w&s" },
-                    { id: 305, name: "Antepasto de Berinjela", desc: "Artesanal (200g).", price: 20.00, img: "https://images.unsplash.com/photo-1627308595229-7830a5c91f9f?q=80&w=1974&auto=format&fit=crop" },
-                    { id: 306, name: "Frutas Secas (150g)", desc: "Damasco e Tâmaras.", price: 22.00, img: "https://alimentesebem.sesisp.org.br/app/uploads/2022/12/GettyImages-513535394-1024x683.jpg" }
+                    { id: 304, name: "SOLO Broto", desc: "Composição: Chips picante de banana, milho com mostarda, blueberry, kiwi, uvas roxas, mix de nuts, tomate cereja e biscoito integral de arroz.", price: 57.00, img: "solo_broto.jpg" },
+                    { id: 305, name: "SOLO Colheita", desc: "Composição: Tomate cereja, mix de nuts, chips de beterraba, chips de abóbora, biscoito de linhaça com alho, pitaya, milho com mostarda, blueberry, lascas de coco e pêra.", price: 73.00, img: "solo_colheita.jpg" }
                 ]
             },
             {
@@ -719,9 +757,8 @@
                 name: 'Edições Especiais & Limitadas',
                 img: 'https://images.unsplash.com/photo-1513201099705-a9746e1e201f?q=80&w=1997&auto=format&fit=crop',
                 items: [
-                    { id: 114, name: "Coração de Pelúcia", desc: "Toque especial de carinho.", price: 45.00, img: "https://http2.mlstatic.com/D_NQ_NP_2X_848941-MLB54107064289_032023-F.webp" },
-                    { id: 115, name: "Cartão Artesanal", desc: "Escrito à mão.", price: 10.00, img: "https://img.elo7.com.br/product/zoom/5073B80/mini-cartao-preciso-dizer-que-te-amo-papelaria.jpg" },
-                    { id: 307, name: "Caixa Presente Luxo", desc: "Embalagem especial rígida.", price: 35.00, img: "https://images.unsplash.com/photo-1549465220-1a8b9238cd48?q=80&w=2040&auto=format&fit=crop" }
+                    { id: 114, name: "SOLO Essência", desc: "Composição: Biscoitos mil folhas, tubinhos de waffer de chocolate, bombom duo com avelã, barrinhas de chocolate ao leite, amêndoas com chocolate.", price: 48.00, img: "solo_essencia.jpg" },
+                    { id: 115, name: "SOLO Especial", desc: "Composição: Barrinhas de chocolate ao leite, bombons duo com avelã, bombons de pistache, leque de mel em biju, biscoitos mil folhas.", price: 140.00, img: "solo_especial.jpg" }
                 ]
             }
         ];
@@ -773,8 +810,8 @@
                 name: 'Pelúcias & Mimos',
                 img: 'https://http2.mlstatic.com/D_Q_NP_2X_910788-MLB104804149804_012026-T.webp',
                 items: [
-                    { id: 114, name: "Coração de Pelúcia", desc: "Toque especial de carinho.", price: 45.00, img: "https://http2.mlstatic.com/D_NQ_NP_2X_848941-MLB54107064289_032023-F.webp" },
-                    { id: 115, name: "Cartão Artesanal", desc: "Escrito à mão.", price: 10.00, img: "https://img.elo7.com.br/product/zoom/5073B80/mini-cartao-preciso-dizer-que-te-amo-papelaria.jpg" }
+                    { id: 114, name: "Coração de Pelúcia", desc: "Toque especial de carinho.", price: 15.00, img: "mimo_coracao.jpg" },
+                    { id: 115, name: "Ursinho de Pelúcia", desc: "Toque de amor e ternura.", price: 12.00, img: "mimo_ursinho.jpg" }
                 ]
             }
         ];
@@ -836,10 +873,11 @@
                 const sloganHtml = item.slogan ? `<p class="item-slogan">${item.slogan}</p>` : '';
                 const descHtml = item.desc ? `<p class="item-comp">${item.desc}</p>` : '';
 
+                // ATUALIZAÇÃO: O onclick='openImageLightbox(...)' foi adicionado na imagem abaixo.
                 return `
                 <div class="item-row">
                     <div class="item-info">
-                        <img src="${item.img}" class="item-thumb" alt="${item.name}">
+                        <img src="${item.img}" class="item-thumb" alt="${item.name}" onClick="openImageLightbox('${item.img}')" title="Clique para ampliar">
                         <div class="item-text">
                             <h4>${item.name}</h4>
                             ${sloganHtml}
