@@ -198,8 +198,8 @@
             backdrop-filter: blur(5px);
         }
         .lightbox-content {
-            width: 70%; /* Ocupa 70% da tela conforme solicitado */
-            max-height: 90vh; /* Garante que não ultrapasse a altura da tela */
+            width: 70%;
+            max-height: 90vh;
             object-fit: contain; border-radius: 4px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
             animation: fadeIn 0.3s ease;
         }
@@ -315,7 +315,7 @@
             .menu-grid { grid-template-columns: 1fr; }
             .delivery-options { flex-direction: column; gap: 0.5rem; }
             .bistro-grid { display: flex; flex-direction: column-reverse; } 
-            .lightbox-content { width: 90%; } /* Ajuste no mobile para não ficar tão pequeno */
+            .lightbox-content { width: 90%; } 
         }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -532,6 +532,19 @@
         <img class="lightbox-content" id="lightboxImg" src="" alt="Imagem Ampliada">
     </div>
 
+    <div class="modal" id="minAlertModal">
+        <div class="auth-container" style="text-align: center; padding: 3rem 2rem; max-width: 400px;">
+            <button class="custom-close-btn" onClick="closeMinAlertModal()" style="top: 10px; right: 10px; width: 30px; height: 30px; font-size: 0.9rem;">
+                <i class="fas fa-times"></i>
+            </button>
+            <i class="fas fa-exclamation-circle" style="font-size: 3.5rem; color: var(--accent-gold); margin-bottom: 1rem;"></i>
+            <h3 style="color: var(--primary); font-family: 'Cormorant Garamond', serif; font-size: 1.8rem; line-height: 1.2;">Aviso</h3>
+            <p style="color: var(--text-gray); margin-top: 1rem; font-size: 1rem;">O valor mínimo para finalizar a compra é de <strong style="color: var(--primary);">R$ 30,00</strong>.</p>
+            <p style="color: var(--text-gray); margin-top: 0.5rem; font-size: 0.9rem;">Adicione mais itens ao seu carrinho para continuar.</p>
+            <button class="btn" onClick="closeMinAlertModal()" style="margin-top: 2rem; width: 100%; cursor: pointer;">Entendi</button>
+        </div>
+    </div>
+
     <div class="modal" id="checkoutModal">
         <div class="auth-container">
             <button class="custom-close-btn" onClick="closeCheckoutModal()" style="top: 10px; right: 10px; width: 35px; height: 35px; font-size: 1rem;">
@@ -714,7 +727,12 @@
 
         function closeImageLightbox() {
             document.getElementById('imageLightbox').style.display = 'none';
-            document.getElementById('lightboxImg').src = ''; // Limpa a fonte ao fechar
+            document.getElementById('lightboxImg').src = ''; 
+        }
+
+        // --- ALERTA VALOR MÍNIMO ---
+        function closeMinAlertModal() {
+            document.getElementById('minAlertModal').style.display = 'none';
         }
 
         // --- ATUALIZAÇÃO DO FECHAMENTO AO CLICAR FORA (UNIFICADO) ---
@@ -723,7 +741,8 @@
             if (e.target == document.getElementById('categoryModal')) closeCategoryModal();
             if (e.target == document.getElementById('rightClickModal')) closeRightClickModal();
             if (e.target == document.getElementById('bistroModal')) closeBistroModal();
-            if (e.target == document.getElementById('imageLightbox')) closeImageLightbox(); // Fecha o visualizador se clicar fora da foto
+            if (e.target == document.getElementById('imageLightbox')) closeImageLightbox(); 
+            if (e.target == document.getElementById('minAlertModal')) closeMinAlertModal();
         }
         
         // --- DADOS ---
@@ -900,7 +919,6 @@
                 const sloganHtml = item.slogan ? `<p class="item-slogan">${item.slogan}</p>` : '';
                 const descHtml = item.desc ? `<p class="item-comp">${item.desc}</p>` : '';
 
-                // ATUALIZAÇÃO: O onclick='openImageLightbox(...)' foi adicionado na imagem abaixo.
                 return `
                 <div class="item-row">
                     <div class="item-info">
@@ -1013,6 +1031,15 @@
 
         function openCheckoutModal() {
             if (cart.length === 0) return alert("Seu carrinho está vazio!");
+            
+            // VERIFICAÇÃO DE VALOR MÍNIMO
+            const totalValue = cart.reduce((acc, item) => acc + (item.price * item.qtd), 0);
+            if (totalValue < 30.00) {
+                document.getElementById('minAlertModal').style.display = 'flex';
+                document.getElementById('cartSidebar').classList.remove('open');
+                return;
+            }
+
             document.getElementById('checkoutModal').style.display = 'flex';
             document.getElementById('cartSidebar').classList.remove('open');
         }
