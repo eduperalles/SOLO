@@ -90,8 +90,8 @@
         .section-title h2 { font-size: 2.5rem; color: var(--primary); margin-bottom: 0.5rem; }
         .section-title p { color: var(--text-gray); font-style: italic; }
 
-        /* --- About & Bistro --- */
-        #about { background-color: var(--bg-alt); }
+        /* --- About, Bistro & Estacao --- */
+        #about, #estacao { background-color: var(--bg-alt); }
         #bistro { background-color: var(--bg-light); }
         .about-grid, .bistro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; }
         .about-img img { width: 100%; border-radius: 4px; filter: grayscale(100%); transition: var(--transition); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
@@ -373,6 +373,7 @@
                 <li><a href="#kits-area">Experiências SOLO</a></li>
                 <li><a href="#custom-area" class="highlight-menu">Monte o Seu</a></li>
                 <li><a href="#bistro">Bistrô</a></li>
+                <li><a href="#estacao">Estação</a></li>
                 <li><a href="#contact">Contato</a></li>
             </ul>
 
@@ -391,6 +392,7 @@
                 <li><a href="#kits-area" onClick="toggleMobileMenu()">Kits Prontos</a></li>
                 <li><a href="#custom-area" onClick="toggleMobileMenu()">Monte o Seu</a></li>
                 <li><a href="#bistro" onClick="toggleMobileMenu()">Bistrô</a></li>
+                <li><a href="#estacao" onClick="toggleMobileMenu()">Estação</a></li>
                 <li><a href="#contact" onClick="toggleMobileMenu()">Contato</a></li>
             </ul>
         </div>
@@ -459,6 +461,27 @@
                     Venha experimentar o melhor de nossas tábuas, frios e charcutaria, além de cafés e bebidas especiais. Feita para grandes momentos. Somente com agendamento em Campinas/SP.
                 </p>
                 <button class="btn" onClick="openBistroModal()">Realizar Agendamento</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="estacao">
+        <div class="about-grid">
+            <div class="about-text">
+                <div class="section-title" style="text-align: left; margin-bottom: 2rem;">
+                    <h2>Vem aí: SOLO Estação</h2>
+                    <p>Leve a experiência SOLO para o seu evento.</p>
+                </div>
+                <p style="color: var(--text-gray); margin-bottom: 1rem;">
+                    Aguardem! Em breve você poderá realizar seus eventos com o exclusivo <strong>Carrinho SOLO</strong>.
+                </p>
+                <p style="color: var(--text-gray); margin-bottom: 2.5rem;">
+                    Nossa nova estação itinerante vai levar o charme, a sofisticação e o sabor da nossa curadoria de charcutaria e queijos artesanais diretamente para a sua festa, casamento ou evento corporativo. Transforme qualquer ocasião em uma memória inesquecível para os seus convidados.
+                </p>
+                <a href="https://wa.me/5519993835111?text=Ol%C3%A1%2C%20tenho%20interesse%20em%20saber%20mais%20sobre%20o%20carrinho%20SOLO%20Esta%C3%A7%C3%A3o%20para%20eventos!" target="_blank" class="btn">Demonstrar Interesse</a>
+            </div>
+            <div class="bistro-img">
+                <img src="solo_itinerante.jpeg" alt="Carrinho SOLO Estação para Eventos">
             </div>
         </div>
     </section>
