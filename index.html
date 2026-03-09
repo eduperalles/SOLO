@@ -578,6 +578,11 @@
                     </label>
                 </div>
             </div>
+			
+			<div class="form-group" id="enderecoGroup" style="display: none; animation: fadeIn 0.3s ease;">
+                <label>Endereço de Entrega *</label>
+                <input type="text" id="clientEndereco" placeholder="Rua, Bairro, nº, Complemento">
+            </div>
 
             <div class="form-group" id="cepGroup" style="display: none; animation: fadeIn 0.3s ease;">
                 <label>CEP de Entrega *</label>
@@ -1043,6 +1048,12 @@
             } else {
                 cepGroup.style.display = 'none';
             }
+			const enderecoGroup = document.getElementById('enderecoGroup');
+            if(type === 'entrega') {
+                enderecoGroup.style.display = 'block';
+            } else {
+                enderecoGroup.style.display = 'none';
+            }
         }
 
         function openCheckoutModal() {
@@ -1065,6 +1076,7 @@
         function sendOrderToWhatsapp() {
             const name = document.getElementById('clientName').value;
             const phone = document.getElementById('clientPhone').value;
+			const endereco = document.getElementById('clientEndereco').value;
             const cep = document.getElementById('clientCep').value;
             const obs = document.getElementById('clientObs').value;
 
@@ -1073,6 +1085,9 @@
             }
             if (!selectedDeliveryType) {
                 return alert("Por favor, selecione a forma de entrega.");
+            }
+			if (!endereco || !endereco) { 
+                return alert("Por favor, preencha endereço de entrega."); 
             }
             if (selectedDeliveryType === 'entrega' && !cep) {
                 return alert("Por favor, informe o CEP para entrega.");
@@ -1085,6 +1100,7 @@
             
             if (selectedDeliveryType === 'entrega') {
                 message += `*ENTREGA:* Delivery\n`;
+				message += `*ENDEREÇO:* ${endereco}\n`;
                 message += `*CEP:* ${cep}\n`;
             } else {
                 message += `*RETIRADA:* Em mãos (Jd. Chapadão)\n`;
