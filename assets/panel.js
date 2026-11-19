@@ -41,6 +41,13 @@
     if (!parts.length) return 'S';
     return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toLocaleUpperCase('pt-BR');
   };
+  const money = value => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(Number(value) || 0);
+  let dashboardData = { receivables: [], payables: [], clients: [], orders: [] };
+  let dashFinanceYear = String(new Date().getFullYear());
+  let dashFinanceType = 'all';
+  let dashClientsYear = String(new Date().getFullYear());
+  let dashClientsMonth = '';
+  let dashOrdersYear = String(new Date().getFullYear());
   const toast = (message, error = false) => {
     toastNode.textContent = message;
     toastNode.classList.toggle('error', error);
@@ -138,7 +145,7 @@
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
     document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
-    if (page === 'dashboard') renderDashboard();
+    if (page === 'dashboard') void loadDashboardPage();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
     else if (page === 'suppliers') void loadSuppliersPage();
@@ -147,6 +154,234 @@
     else if (page === 'settings') void loadSettingsPage();
   }
   document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.page)));
+
+  function getUniqueYears(dateStrings) {
+    const current = new Date().getFullYear();
+    const years = new Set([String(current)]);
+    dateStrings.forEach(str => {
+      const y = String(str || '').slice(0, 4);
+      if (/^\d{4}$/.test(y)) years.add(y);
+    });
+    return Array.from(years).sort().reverse();
+  }
+
+  async function loadDashboardPage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando visão geral…</div>';
+    try {
+      const promises = [];
+      promises.push(api('listUsers').then(res => { users = res; }).catch(() => {}));
+      if (canAccess('finance')) {
+        promises.push(api('listFinanceReceivables').then(res => { dashboardData.receivables = res; }).catch(() => {}));
+        promises.push(api('listFinancePayables').then(res => { dashboardData.payables = res; }).catch(() => {}));
+      }
+      if (canAccess('clients')) {
+        promises.push(api('listClients').then(res => { dashboardData.clients = res; }).catch(() => {}));
+      }
+      if (canAccess('orders')) {
+        promises.push(api('listOrders').then(res => { dashboardData.orders = res; }).catch(() => {}));
+      }
+      await Promise.all(promises);
+      if (activePage === 'dashboard') renderDashboard();
+    } catch (error) {
+      if (activePage === 'dashboard') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function dashFinanceCardMarkup() {
+    const dates = [
+      ...dashboardData.receivables.map(r => r.data_pagamento || r.data_vencimento || r.criado_em),
+      ...dashboardData.payables.map(p => p.data_pagamento || p.data_vencimento || p.criado_em)
+    ];
+    const years = getUniqueYears(dates);
+    const recs = dashboardData.receivables.filter(r => dashFinanceYear === 'all' || (r.data_pagamento || r.data_vencimento || r.criado_em || '').startsWith(dashFinanceYear));
+    const pays = dashboardData.payables.filter(p => dashFinanceYear === 'all' || (p.data_pagamento || p.data_vencimento || p.criado_em || '').startsWith(dashFinanceYear));
+
+    const recPaid = recs.filter(r => r.status === 'pago').reduce((s, r) => s + Number(r.valor || 0), 0);
+    const recPending = recs.filter(r => r.status === 'pendente').reduce((s, r) => s + Number(r.valor || 0), 0);
+    const payPaid = pays.filter(p => p.status === 'pago').reduce((s, p) => s + Number(p.valor || 0), 0);
+    const payPending = pays.filter(p => p.status === 'pendente').reduce((s, p) => s + Number(p.valor || 0), 0);
+    const balance = recPaid - payPaid;
+
+    const bars = [];
+    if (dashFinanceType === 'all' || dashFinanceType === 'received') {
+      bars.push(['Recebido', recPaid, 'received']);
+      bars.push(['A receber', recPending, 'pending']);
+    }
+    if (dashFinanceType === 'all' || dashFinanceType === 'paid') {
+      bars.push(['Pago', payPaid, 'paid']);
+      bars.push(['A pagar', payPending, 'overdue']);
+    }
+    const maxVal = Math.max(1, ...bars.map(b => b[1]));
+
+    return `<section class="content-card dashboard-chart-card">
+      <div class="card-head">
+        <div>
+          <h2>Recebimentos x Gastos</h2>
+          <p>Comparativo anual financeiro</p>
+        </div>
+        <div class="card-filters">
+          <select id="dash-finance-year" aria-label="Filtrar ano financeiro">
+            <option value="all" ${dashFinanceYear === 'all' ? 'selected' : ''}>Todos os anos</option>
+            ${years.map(y => `<option value="${y}" ${dashFinanceYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+          <select id="dash-finance-type" aria-label="Filtrar tipo financeiro">
+            <option value="all" ${dashFinanceType === 'all' ? 'selected' : ''}>Todos</option>
+            <option value="received" ${dashFinanceType === 'received' ? 'selected' : ''}>Recebimentos</option>
+            <option value="paid" ${dashFinanceType === 'paid' ? 'selected' : ''}>Gastos</option>
+          </select>
+        </div>
+      </div>
+      <div class="dash-metric-pills">
+        <div class="dash-metric-pill success"><span>Recebido</span><strong>${money(recPaid)}</strong></div>
+        <div class="dash-metric-pill danger"><span>Pago</span><strong>${money(payPaid)}</strong></div>
+        <div class="dash-metric-pill ${balance >= 0 ? 'success' : 'danger'}"><span>Saldo</span><strong>${money(balance)}</strong></div>
+      </div>
+      <div class="finance-bars" role="img" aria-label="Gráfico de recebimentos e gastos">
+        ${bars.map(([label, val, type]) => `
+          <div class="finance-bar-item">
+            <div class="finance-bar-label"><span>${label}</span><strong>${money(val)}</strong></div>
+            <div class="finance-bar-track"><span class="finance-bar ${type}" style="width:${Math.max(val ? 2 : 0, val / maxVal * 100)}%"></span></div>
+          </div>
+        `).join('')}
+      </div>
+    </section>`;
+  }
+
+  function dashClientsCardMarkup() {
+    const dates = dashboardData.clients.map(c => c.data_cadastro || c.criado_em);
+    const years = getUniqueYears(dates);
+    const yearClients = dashboardData.clients.filter(c => dashClientsYear === 'all' || (c.data_cadastro || c.criado_em || '').startsWith(dashClientsYear));
+    const filteredClients = dashClientsMonth ? yearClients.filter(c => (c.data_cadastro || c.criado_em || '').slice(5, 7) === dashClientsMonth) : yearClients;
+
+    const monthNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const monthCounts = monthNames.map((name, i) => {
+      const m = String(i + 1).padStart(2, '0');
+      return yearClients.filter(c => (c.data_cadastro || c.criado_em || '').slice(5, 7) === m).length;
+    });
+    const maxCount = Math.max(1, ...monthCounts);
+
+    return `<section class="content-card dashboard-chart-card">
+      <div class="card-head">
+        <div>
+          <h2>Clientes cadastrados</h2>
+          <p>Evolução por mês e ano</p>
+        </div>
+        <div class="card-filters">
+          <select id="dash-clients-year" aria-label="Filtrar ano de clientes">
+            <option value="all" ${dashClientsYear === 'all' ? 'selected' : ''}>Todos os anos</option>
+            ${years.map(y => `<option value="${y}" ${dashClientsYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+          <select id="dash-clients-month" aria-label="Filtrar mês de clientes">
+            <option value="" ${dashClientsMonth === '' ? 'selected' : ''}>Todos os meses</option>
+            ${monthNames.map((m, i) => {
+              const val = String(i + 1).padStart(2, '0');
+              return `<option value="${val}" ${dashClientsMonth === val ? 'selected' : ''}>${val} - ${m}</option>`;
+            }).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="dash-metric-pills">
+        <div class="dash-metric-pill gold"><span>No período</span><strong>${filteredClients.length} ${filteredClients.length === 1 ? 'cliente' : 'clientes'}</strong></div>
+        <div class="dash-metric-pill"><span>Total geral</span><strong>${dashboardData.clients.length}</strong></div>
+      </div>
+      <div class="dash-mini-columns" role="img" aria-label="Gráfico de clientes cadastrados por mês">
+        ${monthNames.map((name, i) => {
+          const count = monthCounts[i];
+          const m = String(i + 1).padStart(2, '0');
+          const isSelected = dashClientsMonth === m;
+          const height = Math.max(count ? 12 : 2, Math.round(count / maxCount * 100));
+          return `<div class="dash-col-item ${isSelected ? 'highlight' : ''}" title="${name}: ${count} ${count === 1 ? 'cliente' : 'clientes'}">
+            <span class="dash-col-val">${count || ''}</span>
+            <div class="dash-col-track"><span class="dash-col-bar client" style="height:${height}%"></span></div>
+            <span class="dash-col-label">${name}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </section>`;
+  }
+
+  function dashOrdersCardMarkup() {
+    const dates = dashboardData.orders.map(o => o.data_pedido || o.criado_em);
+    const years = getUniqueYears(dates);
+    const yearOrders = dashboardData.orders.filter(o => dashOrdersYear === 'all' || (o.data_pedido || o.criado_em || '').startsWith(dashOrdersYear));
+    const totalRev = yearOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    const paidCount = yearOrders.filter(o => o.pagamento === 'pago').length;
+    const openCount = yearOrders.filter(o => o.pagamento !== 'pago').length;
+
+    const monthNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const orderCounts = monthNames.map((name, i) => {
+      const m = String(i + 1).padStart(2, '0');
+      return yearOrders.filter(o => (o.data_pedido || o.criado_em || '').slice(5, 7) === m).length;
+    });
+    const maxCount = Math.max(1, ...orderCounts);
+
+    return `<section class="content-card dashboard-chart-card">
+      <div class="card-head">
+        <div>
+          <h2>Pedidos pelo site</h2>
+          <p>Volume anual de vendas online</p>
+        </div>
+        <div class="card-filters">
+          <select id="dash-orders-year" aria-label="Filtrar ano de pedidos">
+            <option value="all" ${dashOrdersYear === 'all' ? 'selected' : ''}>Todos os anos</option>
+            ${years.map(y => `<option value="${y}" ${dashOrdersYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="dash-metric-pills">
+        <div class="dash-metric-pill gold"><span>Pedidos</span><strong>${yearOrders.length}</strong></div>
+        <div class="dash-metric-pill success"><span>Volume</span><strong>${money(totalRev)}</strong></div>
+        <div class="dash-metric-pill"><span>Pagos / Abertos</span><strong>${paidCount} / ${openCount}</strong></div>
+      </div>
+      <div class="dash-mini-columns" role="img" aria-label="Gráfico de pedidos por mês">
+        ${monthNames.map((name, i) => {
+          const count = orderCounts[i];
+          const height = Math.max(count ? 12 : 2, Math.round(count / maxCount * 100));
+          return `<div class="dash-col-item" title="${name}: ${count} ${count === 1 ? 'pedido' : 'pedidos'}">
+            <span class="dash-col-val">${count || ''}</span>
+            <div class="dash-col-track"><span class="dash-col-bar order" style="height:${height}%"></span></div>
+            <span class="dash-col-label">${name}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </section>`;
+  }
+
+  function bindDashboardFilters() {
+    const container = document.querySelector('#dashboard-charts');
+    if (!container) return;
+    container.querySelector('#dash-finance-year')?.addEventListener('change', e => {
+      dashFinanceYear = e.target.value;
+      updateDashboardCharts();
+    });
+    container.querySelector('#dash-finance-type')?.addEventListener('change', e => {
+      dashFinanceType = e.target.value;
+      updateDashboardCharts();
+    });
+    container.querySelector('#dash-clients-year')?.addEventListener('change', e => {
+      dashClientsYear = e.target.value;
+      updateDashboardCharts();
+    });
+    container.querySelector('#dash-clients-month')?.addEventListener('change', e => {
+      dashClientsMonth = e.target.value;
+      updateDashboardCharts();
+    });
+    container.querySelector('#dash-orders-year')?.addEventListener('change', e => {
+      dashOrdersYear = e.target.value;
+      updateDashboardCharts();
+    });
+  }
+
+  function updateDashboardCharts() {
+    const container = document.querySelector('#dashboard-charts');
+    if (!container) return;
+    container.innerHTML = `
+      ${dashFinanceCardMarkup()}
+      ${dashClientsCardMarkup()}
+      ${dashOrdersCardMarkup()}
+    `;
+    bindDashboardFilters();
+  }
 
   function renderDashboard() {
     const admin = user?.perfil === 'admin';
@@ -161,10 +396,12 @@
         <div class="stat"><span>Módulos ativos</span><strong>${Object.values(user?.access || {}).filter(Boolean).length}</strong></div>
         <div class="stat"><span>Próxima etapa</span><strong style="font-size:18px">Em definição</strong></div>
       </div>
-      <section class="content-card">
-        <div class="card-head"><div><h2>Visão inicial</h2><p>Cadastros e financeiro estão disponíveis.</p></div></div>
-        <div class="empty">Use o menu lateral para cadastrar acessos ou organizar contas a receber e contas a pagar.</div>
-      </section>`;
+      <div class="dashboard-charts-grid" id="dashboard-charts">
+        ${dashFinanceCardMarkup()}
+        ${dashClientsCardMarkup()}
+        ${dashOrdersCardMarkup()}
+      </div>`;
+    bindDashboardFilters();
   }
 
   const searchIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>';
@@ -757,7 +994,6 @@
     }
   }
 
-  const money = value => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(Number(value) || 0);
   const financeLabel = type => type === 'receivables' ? 'Contas a receber' : 'Contas a pagar';
   const financePersonLabel = type => type === 'receivables' ? 'Cliente / responsável' : 'Fornecedor / beneficiário';
   function hydrateUserPhotos(list) {
