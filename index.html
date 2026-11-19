@@ -225,14 +225,38 @@
             background: var(--primary); color: white; padding: 1.5rem 0.8rem;
             z-index: 998; cursor: pointer; border-radius: 5px 0 0 5px;
             box-shadow: -2px 5px 15px rgba(0,0,0,0.2); transition: var(--transition);
+            overflow: hidden;
             writing-mode: vertical-rl; text-orientation: mixed;
             font-weight: 700; letter-spacing: 2px; font-size: 0.9rem;
+        }
+        .floating-cart-btn.is-attention {
+            background: var(--accent-gold);
+            animation: cart-pulse 1.8s ease-in-out infinite;
+        }
+        .floating-cart-btn.is-attention::after {
+            content: ""; position: absolute; top: -25%; bottom: -25%; left: -80%;
+            width: 55%; pointer-events: none; transform: skewX(-20deg);
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent);
+            animation: cart-shine 1.8s ease-in-out infinite;
+        }
+        @keyframes cart-pulse {
+            0%, 100% { box-shadow: -2px 5px 15px rgba(0,0,0,0.2); }
+            50% { box-shadow: -4px 5px 24px rgba(212,175,55,0.85), 0 0 18px rgba(212,175,55,0.55); }
+        }
+        @keyframes cart-shine {
+            0%, 20% { left: -80%; }
+            70%, 100% { left: 140%; }
         }
         .floating-cart-btn:hover { background: var(--accent-gold); }
         .floating-cart-btn span { 
             background: white; color: var(--primary); border-radius: 50%; 
             width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
             writing-mode: horizontal-tb; margin-bottom: 10px; font-size: 0.8rem;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .floating-cart-btn.is-attention,
+            .floating-cart-btn.is-attention::after { animation: none; }
         }
 
         /* --- Modals --- */
@@ -988,6 +1012,9 @@
 
             renderCategoryItems(); 
             renderCart();          
+            if (change > 0 && !document.getElementById('cartSidebar').classList.contains('open')) {
+                document.getElementById('floatingCart').classList.add('is-attention');
+            }
             showToast("Carrinho atualizado!");
         }
 
@@ -1147,7 +1174,11 @@
         }
 
         // --- UI GERAIS ---
-        function toggleCart() { document.getElementById('cartSidebar').classList.toggle('open'); }
+        function toggleCart() {
+            const cartSidebar = document.getElementById('cartSidebar');
+            const isOpen = cartSidebar.classList.toggle('open');
+            if (isOpen) document.getElementById('floatingCart').classList.remove('is-attention');
+        }
         function toggleMobileMenu() { document.getElementById('mobileNav').classList.toggle('active'); }
 
         window.onscroll = function() {
