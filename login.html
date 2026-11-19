@@ -4,23 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#151515">
-  <title>Acesso administrativo — SOLO</title>
+  <title>Acesso — SOLO</title>
   <link rel="icon" href="icofont.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/admin.css">
+  <link rel="stylesheet" href="assets/admin.css?v=20261119-orders">
   <script src="assets/config.js"></script>
   <script src="assets/loading.js" defer></script>
-  <script src="assets/login.js" defer></script>
+  <script src="assets/login.js?v=20261119-orders" defer></script>
+  <script src="assets/customer-login.js?v=20261119-orders" defer></script>
 </head>
 <body>
   <main class="login-shell">
     <a class="login-brand" href="index.html"><img src="1.png" alt="SOLO Ateliê Artesanal"></a>
     <section class="login-card">
-      <p class="eyebrow">Área restrita</p>
-      <h1>Acesse o painel</h1>
-      <p class="muted">Entre com sua conta administrativa do SOLO.</p>
-      <form id="login-form">
+      <div class="login-modes" role="tablist" aria-label="Tipo de acesso"><button type="button" role="tab" id="mode-customer" aria-selected="true">Sou cliente</button><button type="button" role="tab" id="mode-team" aria-selected="false">Equipe SOLO</button></div>
+      <p class="eyebrow">Seu espaço SOLO</p>
+      <h1 id="login-title">Meus pedidos</h1>
+      <p class="muted" id="login-description">Consulte suas encomendas com segurança.</p>
+      <form id="customer-login-form">
+        <label for="customer-identifier">WhatsApp ou e-mail</label><input id="customer-identifier" name="identifier" autocomplete="username" maxlength="254" placeholder="WhatsApp com DDD ou e-mail" required>
+        <small class="helper">O código de acesso será enviado ao e-mail cadastrado no seu pedido.</small>
+        <p class="notice" id="customer-notice" role="status"></p>
+        <button class="button" id="customer-request" type="submit">Receber código por e-mail</button>
+        <div id="customer-code-area" hidden><label for="customer-code">Código de 6 números</label><input id="customer-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"><button class="button" id="customer-verify" type="button">Acessar meus pedidos</button><button id="customer-change" type="button">Alterar WhatsApp ou e-mail</button></div>
+      </form>
+      <form id="login-form" hidden>
         <label for="email">E-mail</label>
         <input id="email" name="email" type="email" autocomplete="username" required>
         <label for="password">Senha</label>
@@ -33,7 +42,7 @@
       </form>
       <a class="back-link" href="index.html">← Voltar ao site</a>
     </section>
-    <p class="login-foot">SOLO Ateliê Artesanal · Painel administrativo</p>
+    <p class="login-foot">SOLO Ateliê Artesanal · Área de acesso</p>
   </main>
 </body>
 </html>

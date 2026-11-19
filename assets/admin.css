@@ -235,3 +235,17 @@ dialog::backdrop { background: rgba(0,0,0,.65); backdrop-filter: blur(3px); }
 .sidebar .nav-submenu { display:grid; gap:4px; padding:5px 0 4px 16px; }
 .sidebar .nav-submenu button { font-size:13px; }
 .sidebar { overflow-y:auto; }
+.order-contact { display:block; font-size:10px; color:var(--muted); margin-top:5px; }
+.order-detail { width:min(720px,calc(100% - 24px)); max-height:85vh; border:1px solid var(--line); border-radius:14px; padding:24px; }
+.order-detail::backdrop { background:#0009; }
+.order-message { white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.8 Montserrat,Arial,sans-serif; }
+.customer-main { width:min(1180px,100%); margin:auto; padding:0 24px 40px; }
+.customer-main .topbar { height:auto; min-height:100px; gap:16px; flex-wrap:wrap; padding:20px 0; }
+.customer-main .welcome { margin-top:24px; }
+.login-modes { display:flex; gap:8px; margin-bottom:22px; }
+.login-modes button { flex:1; border:1px solid var(--line); border-radius:8px; padding:11px 8px; background:#f4f1ea; color:var(--ink); font-size:12px; font-weight:700; }
+.login-modes button[aria-selected="true"] { background:var(--navy); color:#fff; }
+#customer-code-area { margin-top:20px; }
+#customer-login-form .helper { display:block; line-height:1.7; }
+#customer-code-area input { letter-spacing:.35em; text-align:center; font-size:21px; }
+#customer-change { margin-top:10px; width:100%; border:0; padding:10px; background:none; color:var(--muted); }

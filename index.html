@@ -351,6 +351,9 @@
         .access-counter i { color: var(--accent-gold); }
         .access-counter span { color: white; font-weight: 700; }
     </style>
+  <link rel="stylesheet" href="assets/checkout.css?v=20261119-orders">
+  <script src="assets/config.js"></script>
+  <script src="assets/checkout.js?v=20261119-orders" defer></script>
 </head>
 <body>
 <div class="print-warning" style="display: none;">
@@ -560,12 +563,16 @@
             <p style="text-align: center; margin-bottom: 1.5rem; color: #666;">Solicitamos 48hs de antecedência para encomendas. A confirmação do pedido e o valor do frete serão informados via WhatsApp da loja.</p>
             
             <div class="form-group">
-                <label>Seu Nome *</label>
-                <input type="text" id="clientName" placeholder="Como gostaria de ser chamado?">
+                <label for="clientName">Seu Nome completo *</label>
+                <input type="text" id="clientName" placeholder="Seu nome completo" minlength="2" maxlength="180" autocomplete="name" required>
             </div>
             <div class="form-group">
-                <label>Seu Telefone / WhatsApp *</label>
-                <input type="text" id="clientPhone" placeholder="(XX) XXXXX-XXXX">
+                <label for="clientPhone">Seu Telefone / WhatsApp *</label>
+                <input type="tel" id="clientPhone" inputmode="numeric" maxlength="15" placeholder="(11) 99999-9999" autocomplete="tel-national" required>
+            </div>
+            <div class="form-group">
+                <label for="clientEmail">Seu E-mail *</label>
+                <input type="email" id="clientEmail" maxlength="254" placeholder="voce@exemplo.com" autocomplete="email" required>
             </div>
 
             <div class="form-group">
@@ -596,7 +603,7 @@
 
             <div class="form-group">
                 <label>Observações (Opcional)</label>
-                <textarea id="clientObs" placeholder="Ex: Tirar a pimenta, embalar para presente..."></textarea>
+                <textarea id="clientObs" maxlength="2000" placeholder="Ex: Tirar a pimenta, embalar para presente..."></textarea>
             </div>
             
             <button type="button" class="whatsapp-btn" onClick="sendOrderToWhatsapp()">
@@ -1079,60 +1086,17 @@
         function closeCheckoutModal() { document.getElementById('checkoutModal').style.display = 'none'; }
 
         function sendOrderToWhatsapp() {
-            const name = document.getElementById('clientName').value;
-            const phone = document.getElementById('clientPhone').value;
-			const endereco = document.getElementById('clientEndereco').value;
-            const cep = document.getElementById('clientCep').value;
-            const obs = document.getElementById('clientObs').value;
-
-            if (!name || !phone) { 
-                return alert("Por favor, preencha nome e telefone."); 
-            }
-            if (!selectedDeliveryType) {
-                return alert("Por favor, selecione a forma de entrega.");
-            }
-			if (!endereco || !endereco) { 
-                return alert("Por favor, preencha endereço de entrega."); 
-            }
-            if (selectedDeliveryType === 'entrega' && !cep) {
-                return alert("Por favor, informe o CEP para entrega.");
-            }
-
-            let message = `*SOLO ATELIÊ - NOVO PEDIDO*\n`;
-            message += `-----------------------------------\n`;
-            message += `*CLIENTE:* ${name}\n`;
-            message += `*TELEFONE:* ${phone}\n`;
-            
-            if (selectedDeliveryType === 'entrega') {
-                message += `*ENTREGA:* Delivery\n`;
-				message += `*ENDEREÇO:* ${endereco}\n`;
-                message += `*CEP:* ${cep}\n`;
-            } else {
-                message += `*RETIRADA:* Em mãos (Jd. Chapadão)\n`;
-            }
-
-            message += `-----------------------------------\n`;
-            message += `*ITENS DO PEDIDO:*\n\n`;
-
-            cart.forEach(item => {
-                const totalItem = item.price * item.qtd;
-                message += `[ ${item.qtd}x ] *${item.name}*\n`;
-                if(item.slogan) message += `_${item.slogan}_\n`;
-                message += `       R$ ${totalItem.toFixed(2).replace('.', ',')}\n`;
-            });
-
-            if(obs && obs.trim() !== "") {
-                message += `\n*OBSERVAÇÕES:*\n${obs}\n`;
-            }
-
-            const totalValue = cart.reduce((acc, item) => acc + (item.price * item.qtd), 0);
-            message += `\n-----------------------------------\n`;
-            message += `*TOTAL A PAGAR: R$ ${totalValue.toFixed(2).replace('.', ',')}*\n`;
-            message += `-----------------------------------\n`;
-            message += `_Aguardo confirmação, valor do frete e chave PIX._`;
-
-            window.open(`https://wa.me/5519993835111?text=${encodeURIComponent(message)}`, '_blank');
-            closeCheckoutModal();
+            if (!cart.length) return;
+            window.SoloCheckout.place({
+                nome:document.getElementById('clientName').value.trim(),
+                email:document.getElementById('clientEmail').value,
+                whatsapp:document.getElementById('clientPhone').value,
+                entrega:selectedDeliveryType,
+                endereco:document.getElementById('clientEndereco')?.value || '',
+                cep:document.getElementById('clientCep').value,
+                observacoes:document.getElementById('clientObs').value,
+                itens:cart.map(item => ({id:item.id,quantidade:item.qtd}))
+            }, () => { cart=[];renderCart();closeCheckoutModal(); });
         }
 
         // --- LÓGICA DO BISTRÔ ---

@@ -1,15 +1,15 @@
 const DRIVE_FOLDER_ID_ = '1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva';
 const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status','foto_arquivo_id','foto_atualizada_em','criado_em','atualizado_em'];
-const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em'];
+const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em','cliente_id','pedido_id'];
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','orders','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:2,clients:!!props.getProperty('CLIENTS_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -23,9 +23,16 @@ function doPost(event) {
 }
 
 function dispatch_(request) {
-  const publicActions = ['login'];
+  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout'];
   const actor = publicActions.includes(request.action) ? null : auth_(request.token);
   switch (request.action) {
+    case 'placeOrder': return placeOrder_(request);
+    case 'requestCustomerCode': return requestCustomerCode_(request);
+    case 'verifyCustomerCode': return verifyCustomerCode_(request);
+    case 'customerOrders': return customerOrders_(request);
+    case 'customerLogout': return customerLogout_(request);
+    case 'listOrders': return listOrders_(actor);
+    case 'retryOrder': module_(actor, 'orders'); return withLock_(() => { const rows=readOrders_(); const order=rows.find(row=>row.id===String(request.id || '')); if (!order) throw Error('Pedido não encontrado.'); if (order.status !== 'recebido') finishOrder_(order,rows); return {saved:true}; });
     case 'login': return login_(request);
     case 'logout': return logout_(request);
     case 'validateSession': return publicUser_(actor);
@@ -113,15 +120,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.filter(key => key !== 'clients').some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => !['clients','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,orders:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -144,11 +151,11 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
@@ -221,6 +228,7 @@ function deleteClient_(actor, id, version) {
     const selected = rows.find(row => row.id === String(id || ''));
     if (!selected) throw Error('Cliente não encontrado.');
     if (String(version || '') !== selected.atualizado_em) throw Error('Cliente atualizado por outra sessão. Atualize a lista antes de excluir.');
+    if (PropertiesService.getScriptProperties().getProperty('ORDERS_FILE_ID') && readOrders_().some(order => order.cliente_id === selected.id)) throw Error('Este cliente possui pedidos vinculados e não pode ser excluído.');
     saveClientRows_(rows.filter(row => row.id !== selected.id));
     return {deleted:true};
   });
@@ -249,7 +257,7 @@ function readFinance_(type) {
   if (!text.trim()) return [];
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift().map(String);
-  if (FINANCE_COLUMNS_.some(column => !headers.includes(column))) throw Error('Cabeçalho financeiro inválido.');
+  if (FINANCE_COLUMNS_.filter(column => !['cliente_id','pedido_id'].includes(column)).some(column => !headers.includes(column))) throw Error('Cabeçalho financeiro inválido.');
   return matrix.filter(row => row.some(value => value !== '')).map(row => {
     const record = {};
     headers.forEach((header, index) => record[header] = row[index] || '');
@@ -277,7 +285,7 @@ function saveFinance_(actor, type, input) {
   const due = String(input.data_vencimento || '');
   const paid = String(input.data_pagamento || '');
   const status = String(input.status || 'pendente');
-  if (descricao.length < 2 || descricao.length > 180 || pessoa.length > 180 || categoria.length > 120 || observacoes.length > 2000) {
+  if (descricao.length < 2 || descricao.length > 180 || pessoa.length > 180 || categoria.length > 120 || observacoes.length > 20000) {
     throw Error('Revise descrição, pessoa, categoria e observações.');
   }
   if (!Number.isFinite(amount) || amount < 0.01 || amount > 999999999) throw Error('Informe um valor válido maior que zero.');
@@ -291,6 +299,8 @@ function saveFinance_(actor, type, input) {
     if (id && !old) throw Error('Registro financeiro não encontrado.');
     const record = {
       id:old ? old.id : Utilities.getUuid(),
+      cliente_id:old ? old.cliente_id || '' : '',
+      pedido_id:old ? old.pedido_id || '' : '',
       descricao,
       pessoa,
       categoria,
@@ -609,4 +619,186 @@ function constantTime_(first, second) {
   let difference = a.length ^ b.length;
   for (let index = 0; index < Math.max(a.length,b.length); index++) difference |= (a.charCodeAt(index) || 0) ^ (b.charCodeAt(index) || 0);
   return difference === 0;
+}
+
+const ORDER_CATALOG_ = [{"id":101,"nome":"SOLO Afeto","centavos":3000,"slogan":""},{"id":102,"nome":"SOLO Essencial","centavos":5600,"slogan":""},{"id":103,"nome":"SOLO Conexão","centavos":9800,"slogan":""},{"id":104,"nome":"SOLO Celebração","centavos":22000,"slogan":""},{"id":105,"nome":"SOLO Alvorada","centavos":6000,"slogan":""},{"id":106,"nome":"SOLO Harmonia","centavos":19500,"slogan":""},{"id":107,"nome":"SOLO Melodia","centavos":8500,"slogan":""},{"id":108,"nome":"SOLO Love","centavos":15000,"slogan":""},{"id":109,"nome":"SOLO Prisma","centavos":11000,"slogan":""},{"id":110,"nome":"SOLO Legado","centavos":20000,"slogan":""},{"id":111,"nome":"SOLO Broto","centavos":5700,"slogan":""},{"id":112,"nome":"SOLO Colheita","centavos":7300,"slogan":""},{"id":113,"nome":"SOLO Essência","centavos":4800,"slogan":""},{"id":114,"nome":"SOLO Especial","centavos":14000,"slogan":""},{"id":201,"nome":"Pão Italiano (100g)","centavos":399,"slogan":""},{"id":202,"nome":"Pão Australiano (100g)","centavos":399,"slogan":""},{"id":203,"nome":"Mini Pão Francês","centavos":380,"slogan":""},{"id":204,"nome":"Queijo Brie (20g)","centavos":400,"slogan":""},{"id":205,"nome":"Queijo Gorgonzola (30g)","centavos":550,"slogan":""},{"id":206,"nome":"Queijo Gouda c/ervas (40g)","centavos":500,"slogan":""},{"id":207,"nome":"Queijo Provolone (20g)","centavos":350,"slogan":""},{"id":208,"nome":"Queijo Provolone c/orégano (40g)","centavos":550,"slogan":""},{"id":209,"nome":"Queijo Emmental (40g)","centavos":550,"slogan":""},{"id":210,"nome":"Palito Queijo Mussarela Condimentado (20g)","centavos":700,"slogan":""},{"id":211,"nome":"Queijo Minas Especial (30g)","centavos":600,"slogan":""},{"id":212,"nome":"Bolacha de Queijo Coalho Desidratado (40g)","centavos":1150,"slogan":""},{"id":213,"nome":"Bolacha de Provolone Desidratado (40g)","centavos":1150,"slogan":""},{"id":300,"nome":"Salame Italiano (40g)","centavos":1750,"slogan":""},{"id":301,"nome":"Copa Duroc (40g)","centavos":2000,"slogan":""},{"id":302,"nome":"Lonza Duroc (40g)","centavos":2000,"slogan":""},{"id":303,"nome":"Presunto Cru - Fiocco (40g)","centavos":2000,"slogan":""},{"id":304,"nome":"Lombo Defumado (40g)","centavos":1450,"slogan":""},{"id":305,"nome":"Salame Jabuticaba (40g)","centavos":1150,"slogan":""},{"id":400,"nome":"Geléia de Pimenta (50g)","centavos":1160,"slogan":""},{"id":401,"nome":"Torradas simples (7 Unid.)","centavos":400,"slogan":""},{"id":402,"nome":"Biscoito de Linhaça com Alho (30g)","centavos":450,"slogan":""},{"id":403,"nome":"Mel - favo (50g)","centavos":700,"slogan":""},{"id":404,"nome":"Mix de Nuts (40g)","centavos":600,"slogan":""},{"id":405,"nome":"Castanha de Caju (40g)","centavos":450,"slogan":""},{"id":406,"nome":"Milho com Mostarda (30g)","centavos":800,"slogan":""},{"id":407,"nome":"Chips de Beterraba (30g)","centavos":500,"slogan":""},{"id":408,"nome":"Chips de Abóbora (30g)","centavos":500,"slogan":""},{"id":409,"nome":"Chips de Banana Picante (30g)","centavos":450,"slogan":""},{"id":410,"nome":"Chips de Jaca (30g)","centavos":750,"slogan":""},{"id":411,"nome":"Macadamia com sal (30g)","centavos":600,"slogan":""},{"id":412,"nome":"Damasco (30g)","centavos":700,"slogan":""},{"id":413,"nome":"Tâmara sem caroço (30g)","centavos":500,"slogan":""},{"id":218,"nome":"Coração de Pelúcia","centavos":1500,"slogan":""},{"id":219,"nome":"Ursinho de Pelúcia","centavos":1200,"slogan":""}];
+
+// Pedidos do site e acesso isolado dos clientes.
+const ORDER_COLUMNS_ = ['id','numero','chave_idempotencia','payload_hash','cliente_id','nome','email','whatsapp','itens_json','total','entrega','endereco','cep','observacoes','mensagem','status','conta_receber_id','data_pedido','criado_em','atualizado_em'];
+
+function setupOrders() {
+  return withLock_(() => {
+    const props = PropertiesService.getScriptProperties();
+    const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+    const files = folder.getFilesByName('pedidos.csv');
+    const file = files.hasNext() ? files.next() : folder.createFile('pedidos.csv', csv_(ORDER_COLUMNS_, []), 'text/csv');
+    props.setProperty('ORDERS_FILE_ID', file.getId());
+    const rows = readAccess_();
+    rows.forEach(row => { if (row.orders === undefined) row.orders = '0'; });
+    DriveApp.getFileById(props.getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
+    // Confere autorização de e-mail sem enviar mensagens durante a configuração.
+    MailApp.getRemainingDailyQuota();
+    return 'Pedidos e acesso dos clientes configurados no SOLO.';
+  });
+}
+
+function readOrders_() {
+  const id = PropertiesService.getScriptProperties().getProperty('ORDERS_FILE_ID');
+  if (!id) throw Error('Pedidos ainda não configurados.');
+  const matrix = Utilities.parseCsv(DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, ''));
+  const headers = matrix.shift() || [];
+  if (ORDER_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de pedidos.csv inválido.');
+  return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key,index) => [key,row[index] || ''])));
+}
+function saveOrders_(rows) {
+  DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('ORDERS_FILE_ID')).setContent(csv_(ORDER_COLUMNS_, rows));
+}
+function brazilDate_() { return Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'yyyy-MM-dd'); }
+function phoneKey_(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return /^55\d{10,11}$/.test(digits) ? digits.slice(2) : digits;
+}
+function cleanOrder_(input) {
+  const nome = String(input.nome || '').trim();
+  const email = normalizeEmail_(input.email);
+  const whatsapp = phoneKey_(input.whatsapp);
+  const entrega = String(input.entrega || '');
+  const endereco = entrega === 'entrega' ? String(input.endereco || '').trim() : '';
+  const cep = entrega === 'entrega' ? String(input.cep || '').replace(/\D/g, '') : '';
+  const observacoes = String(input.observacoes || '').trim();
+  if (nome.length < 2 || nome.length > 180 || !validEmail_(email) || !/^\d{10,11}$/.test(whatsapp)) throw Error('Revise nome completo, e-mail e WhatsApp com DDD.');
+  if (!['retirada','entrega'].includes(entrega) || entrega === 'entrega' && (endereco.length < 5 || endereco.length > 500 || !/^\d{8}$/.test(cep))) throw Error('Revise a forma de entrega, o endereço e o CEP.');
+  if (observacoes.length > 2000 || !Array.isArray(input.itens) || !input.itens.length || input.itens.length > 49) throw Error('Revise os itens e observações do pedido.');
+  const seen = new Set();
+  const itens = input.itens.map(item => {
+    const product = ORDER_CATALOG_.find(product => product.id === Number(item.id));
+    const quantidade = Number(item.quantidade);
+    if (!product || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 99 || seen.has(product.id)) throw Error('Item ou quantidade inválida. Atualize o carrinho.');
+    seen.add(product.id);
+    return {id:product.id,nome:product.nome,slogan:product.slogan,quantidade,valor_unitario:product.centavos / 100,total:product.centavos * quantidade / 100};
+  }).sort((a,b) => a.id-b.id);
+  const centavos = itens.reduce((sum,item) => sum + Math.round(item.valor_unitario*100)*item.quantidade,0);
+  if (centavos < 3000 || centavos > 99999999) throw Error('O pedido mínimo é R$ 30,00. Revise o total do carrinho.');
+  return {nome,email,whatsapp,entrega,endereco,cep,observacoes,itens,total:centavos/100};
+}
+function orderMessage_(order) {
+  const brl = value => 'R$ ' + Number(value).toFixed(2).replace('.', ',');
+  let message = '*SOLO ATELIÊ - NOVO PEDIDO*\n*PEDIDO:* ' + order.numero + '\n-----------------------------------\n';
+  message += '*CLIENTE:* ' + order.nome + '\n*E-MAIL:* ' + order.email + '\n*TELEFONE:* ' + order.whatsapp + '\n';
+  message += order.entrega === 'entrega' ? '*ENTREGA:* Delivery\n*ENDEREÇO:* ' + order.endereco + '\n*CEP:* ' + order.cep + '\n' : '*RETIRADA:* Em mãos (Jd. Chapadão)\n';
+  message += '-----------------------------------\n*ITENS DO PEDIDO:*\n\n';
+  JSON.parse(order.itens_json).forEach(item => {
+    message += '[ ' + item.quantidade + 'x ] *' + item.nome + '*\n';
+    if (item.slogan) message += '_' + item.slogan + '_\n';
+    message += '       ' + brl(item.total) + '\n';
+  });
+  if (order.observacoes) message += '\n*OBSERVAÇÕES:*\n' + order.observacoes + '\n';
+  return message + '\n-----------------------------------\n*TOTAL A PAGAR: ' + brl(order.total) + '*\n-----------------------------------\n_Aguardo confirmação, valor do frete e chave PIX. Frete a confirmar pela loja._';
+}
+function finishOrder_(order, orders) {
+  const clients = readClients_();
+  if (!clients.some(client => client.id === order.cliente_id)) {
+    clients.push({id:order.cliente_id,nome:order.nome,email:order.email,whatsapp:order.whatsapp,data_cadastro:order.data_pedido,criado_em:order.criado_em,atualizado_em:order.criado_em});
+    saveClientRows_(clients);
+  }
+  const finance = readFinance_('receivables');
+  if (!finance.some(row => row.id === order.conta_receber_id)) {
+    finance.push({id:order.conta_receber_id,descricao:'Pedido ' + order.numero,pessoa:order.nome,categoria:'Pedidos do site',valor:Number(order.total).toFixed(2),data_vencimento:order.data_pedido,data_pagamento:'',status:'pendente',observacoes:order.mensagem,cliente_id:order.cliente_id,pedido_id:order.id,criado_em:order.criado_em,atualizado_em:order.criado_em});
+    saveFinanceRows_('receivables', finance);
+  }
+  order.status = 'recebido'; order.atualizado_em = now_();
+  saveOrders_(orders);
+}
+function placeOrder_(request) {
+  const key = String(request.idempotency_key || '');
+  if (!/^[a-zA-Z0-9-]{20,80}$/.test(key)) throw Error('Identificador de pedido inválido. Atualize a página.');
+  const input = cleanOrder_(request.record || {});
+  // Não usa preços ou nomes enviados pelo navegador como fonte do financeiro.
+  const fingerprint = digest_(JSON.stringify({...input,itens:input.itens.map(item => ({id:item.id,quantidade:item.quantidade}))}));
+  return withLock_(() => {
+    const orders = readOrders_();
+    let order = orders.find(row => row.chave_idempotencia === key);
+    if (order && order.payload_hash !== fingerprint) throw Error('Este envio já pertence a outro pedido. Reabra a finalização.');
+    if (!order) {
+      const today = brazilDate_();
+      if (orders.filter(row => row.whatsapp === input.whatsapp && row.criado_em.slice(0,10) === today).length >= 20) throw Error('Limite de pedidos atingido. Fale com a loja.');
+      const clients = readClients_();
+      const matches = clients.filter(row => normalizeEmail_(row.email) === input.email || phoneKey_(row.whatsapp) === input.whatsapp);
+      if (matches.length > 1 || matches.length === 1 && (normalizeEmail_(matches[0].email) !== input.email || phoneKey_(matches[0].whatsapp) !== input.whatsapp)) throw Error('Os contatos informados precisam coincidir com seu cadastro. Confira e-mail e WhatsApp ou fale com a loja.');
+      const stamp = now_(); const id = Utilities.getUuid();
+      order = {id,numero:'SOLO-' + today.replace(/-/g,'') + '-' + id.replace(/-/g,'').slice(0,8).toUpperCase(),chave_idempotencia:key,payload_hash:fingerprint,cliente_id:matches.length ? matches[0].id : Utilities.getUuid(),nome:input.nome,email:input.email,whatsapp:input.whatsapp,itens_json:JSON.stringify(input.itens),total:input.total.toFixed(2),entrega:input.entrega,endereco:input.endereco,cep:input.cep,observacoes:input.observacoes,mensagem:'',status:'processando',conta_receber_id:Utilities.getUuid(),data_pedido:today,criado_em:stamp,atualizado_em:stamp};
+      order.mensagem = orderMessage_(order);
+      orders.push(order); saveOrders_(orders); // Journal persistente permite retomar gravações interrompidas.
+    }
+    if (order.status !== 'recebido') finishOrder_(order, orders);
+    return {id:order.id,numero:order.numero,total:Number(order.total),mensagem:order.mensagem,whatsapp_url:'https://wa.me/5519993835111?text=' + encodeURIComponent(order.mensagem)};
+  });
+}
+function orderView_(order, finance) {
+  const receivable = finance.find(row => row.id === order.conta_receber_id);
+  return {id:order.id,numero:order.numero,cliente_id:order.cliente_id,nome:order.nome,email:order.email,whatsapp:order.whatsapp,itens:JSON.parse(order.itens_json),total:Number(order.total),entrega:order.entrega,endereco:order.endereco,cep:order.cep,observacoes:order.observacoes,mensagem:order.mensagem,status:order.status,pagamento:receivable && receivable.status === 'pago' ? 'pago' : 'em_aberto',criado_em:order.criado_em};
+}
+function listOrders_(actor) {
+  module_(actor, 'orders');
+  const finance = readFinance_('receivables');
+  return readOrders_().sort((a,b) => b.criado_em.localeCompare(a.criado_em)).map(order => orderView_(order, finance));
+}
+function requestCustomerCode_(request) {
+  const identifier = String(request.identifier || '').trim().toLowerCase();
+  if (identifier.length > 254 || identifier.length < 5) throw Error('Informe seu e-mail ou WhatsApp com DDD.');
+  const response = {message:'Se os dados estiverem cadastrados, um código será enviado ao e-mail do seu cadastro. Ele vale por 10 minutos.'};
+  return withLock_(() => {
+    const cache = CacheService.getScriptCache();
+    const key = 'customer-code:' + digest_(identifier.includes('@') ? identifier : phoneKey_(identifier));
+    if (cache.get(key + ':cooldown')) return response;
+    const clients = readClients_().filter(row => identifier.includes('@') ? normalizeEmail_(row.email) === identifier : phoneKey_(row.whatsapp) === phoneKey_(identifier));
+    cache.put(key + ':cooldown','1',60);
+    if (clients.length !== 1 || !validEmail_(clients[0].email)) return response;
+    const client = clients[0];
+    const clientKey = 'customer-code-client:' + client.id;
+    if (cache.get(clientKey + ':cooldown')) return response;
+    const code = String(parseInt(Utilities.getUuid().replace(/-/g,'').slice(0,8),16) % 1000000).padStart(6,'0');
+    const challenge = {id:client.id,email:normalizeEmail_(client.email),phone:phoneKey_(client.whatsapp),hash:digest_(client.id + ':' + code),attempts:0,expires:Date.now()+600000};
+    cache.put(clientKey,JSON.stringify(challenge),600);
+    cache.put(clientKey + ':cooldown','1',60);
+    if (MailApp.getRemainingDailyQuota() < 1) throw Error('Envio de código temporariamente indisponível. Tente novamente mais tarde.');
+    MailApp.sendEmail({to:client.email,subject:'Seu código de acesso — SOLO Ateliê',body:'Seu código para acessar os pedidos do SOLO é: ' + code + '\n\nVálido por 10 minutos. Não compartilhe este código. Se não solicitou o acesso, ignore esta mensagem.',name:'SOLO Ateliê Artesanal'});
+    return response;
+  });
+}
+function verifyCustomerCode_(request) {
+  return withLock_(() => {
+    const identifier = String(request.identifier || '').trim().toLowerCase();
+    const code = String(request.code || '');
+    const error = () => { throw Error('Código inválido ou expirado. Solicite um novo código.'); };
+    if (identifier.length > 254 || !/^\d{6}$/.test(code)) return error();
+    const clients = readClients_().filter(row => identifier.includes('@') ? normalizeEmail_(row.email) === identifier : phoneKey_(row.whatsapp) === phoneKey_(identifier));
+    if (clients.length !== 1) return error();
+    const client = clients[0]; const cache = CacheService.getScriptCache();
+    const key = 'customer-code-client:' + client.id;
+    const challenge = JSON.parse(cache.get(key) || 'null');
+    if (!challenge || challenge.attempts >= 5 || challenge.expires < Date.now()) return error();
+    challenge.attempts += 1; cache.put(key,JSON.stringify(challenge),Math.max(1,Math.ceil((challenge.expires-Date.now())/1000)));
+    if (challenge.email !== normalizeEmail_(client.email) || challenge.phone !== phoneKey_(client.whatsapp) || !constantTime_(challenge.hash,digest_(client.id + ':' + code))) return error();
+    cache.remove(key);
+    const token = random_() + random_();
+    cache.put('customer-session:' + digest_(token),JSON.stringify({id:client.id,email:challenge.email,phone:challenge.phone}),SESSION_SECONDS);
+    return {token,user:{nome:client.nome},expiresIn:SESSION_SECONDS};
+  });
+}
+function customerAuth_(token) {
+  const saved = token && CacheService.getScriptCache().get('customer-session:' + digest_(String(token)));
+  const session = JSON.parse(saved || 'null');
+  const client = session && readClients_().find(row => row.id === session.id);
+  if (!client || normalizeEmail_(client.email) !== session.email || phoneKey_(client.whatsapp) !== session.phone) throw Error('Sessão do cliente expirada. Entre novamente.');
+  return client;
+}
+function customerOrders_(request) {
+  const client = customerAuth_(request.token);
+  const finance = readFinance_('receivables');
+  return {cliente:{nome:client.nome},pedidos:readOrders_().filter(order => order.cliente_id === client.id && order.status === 'recebido').sort((a,b) => b.criado_em.localeCompare(a.criado_em)).map(order => orderView_(order,finance))};
+}
+function customerLogout_(request) {
+  CacheService.getScriptCache().remove('customer-session:' + digest_(String(request.token || '')));
+  return {loggedOut:true};
 }

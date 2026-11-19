@@ -6,7 +6,7 @@
   const toggle = form.querySelector('[data-password-toggle]');
   const password = form.querySelector('#password');
 
-  if (sessionStorage.getItem('solo_session')) location.replace('admin/dashboard.html');
+  if (new URLSearchParams(location.search).get('acesso') === 'equipe' && sessionStorage.getItem('solo_session')) location.replace('admin/dashboard.html');
   toggle.addEventListener('click', () => {
     const visible = password.type === 'text';
     password.type = visible ? 'password' : 'text';

@@ -50,6 +50,8 @@
       validateSession:'Validando acesso',
       listUsers:'Carregando usuários',
       listClients:'Carregando clientes',
+      listOrders:'Carregando pedidos',
+      retryOrder:'Concluindo gravação do pedido',
       createClient:'Salvando cliente',
       updateClient:'Salvando cliente',
       deleteClient:'Excluindo cliente',
@@ -125,11 +127,12 @@
     }
     document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') renderDashboard();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
+    else if (page === 'orders') void loadOrdersPage();
     else if (page === 'finance') void loadFinancePage();
     else if (page === 'settings') void loadSettingsPage();
   }
@@ -220,7 +223,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','clients','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','orders','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -240,6 +243,15 @@
     if (national.length === 10) return prefix + national.replace(/^(\d{2})(\d{4})(\d{4})$/, '($1) $2-$3');
     return digits;
   }
+  async function loadOrdersPage() {
+    workspace.innerHTML='<div class="workspace-state">Carregando pedidos…</div>';
+    try {
+      const orders=await api('listOrders');
+      if(activePage !== 'orders')return;
+      window.SoloOrderView.render(workspace,orders,{admin:true,onRetry:async id=>{try {await api('retryOrder',{id});await loadOrdersPage();toast('Gravação concluída.');}catch(error){toast(error.message,true);}}});
+    }catch(error){if(activePage==='orders')workspace.innerHTML=`<div class="workspace-state">${escapeHtml(error.message)}</div>`;}
+  }
+
   async function loadClientsPage() {
     workspace.innerHTML = '<div class="workspace-state">Carregando clientes…</div>';
     try {
@@ -501,7 +513,7 @@
         <td>${escapeHtml(row.pessoa || '—')}</td>
         <td><strong>${money(row.valor)}</strong></td>
         <td>${escapeHtml(formatDate(row.data_vencimento))}</td>
-        <td><span class="badge ${row.status === 'pago' ? '' : 'finance-pending'}">${row.status === 'pago' ? 'Pago' : 'Pendente'}</span></td>
+        <td><span class="badge ${row.status === 'pago' ? '' : 'finance-pending'}">${row.status === 'pago' ? 'Pago' : 'Em aberto'}</span></td>
         <td><div class="row-actions"><button class="tiny-button" type="button" data-finance-edit="${escapeHtml(row.id)}">Editar</button><button class="tiny-button danger" type="button" data-finance-delete="${escapeHtml(row.id)}">Excluir</button></div></td>
       </tr>`).join('')}</tbody></table></div>`;
   }
@@ -591,7 +603,7 @@
     workspace.innerHTML = `
       ${financeMainTabs()}
       <section class="content-card finance-summary">
-        <div><span>Total pendente</span><strong>${money(financeRows[type].filter(row => row.status === 'pendente').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
+        <div><span>Total em aberto</span><strong>${money(financeRows[type].filter(row => row.status === 'pendente').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
         <div><span>Total pago</span><strong>${money(financeRows[type].filter(row => row.status === 'pago').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
         <div><span>Lançamentos</span><strong>${financeRows[type].length}</strong></div>
       </section>
@@ -608,9 +620,9 @@
           <div class="field"><label for="finance-category">Categoria</label><input id="finance-category" name="categoria" maxlength="120" value="${escapeHtml(current?.categoria || '')}" placeholder="Ex.: Serviços, fornecedores"></div>
           <div class="field"><label for="finance-value">Valor (R$) *</label><input id="finance-value" name="valor" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.valor)*100) : '')}" placeholder="0,00" required></div>
           <div class="field"><label for="finance-due">Vencimento *</label><input id="finance-due" name="data_vencimento" type="date" value="${escapeHtml(current?.data_vencimento || '')}" required></div>
-          <div class="field"><label for="finance-status">Status *</label><select id="finance-status" name="status"><option value="pendente" ${current?.status !== 'pago' ? 'selected' : ''}>Pendente</option><option value="pago" ${current?.status === 'pago' ? 'selected' : ''}>Pago</option></select></div>
+          <div class="field"><label for="finance-status">Status *</label><select id="finance-status" name="status"><option value="pendente" ${current?.status !== 'pago' ? 'selected' : ''}>Em aberto</option><option value="pago" ${current?.status === 'pago' ? 'selected' : ''}>Pago</option></select></div>
           <div class="field"><label for="finance-paid">Data do pagamento</label><input id="finance-paid" name="data_pagamento" type="date" value="${escapeHtml(current?.data_pagamento || '')}" ${current?.status === 'pago' ? '' : 'disabled'}></div>
-          <div class="field full"><label for="finance-notes">Observações</label><textarea id="finance-notes" name="observacoes" maxlength="2000" rows="3">${escapeHtml(current?.observacoes || '')}</textarea></div>
+          <div class="field full"><label for="finance-notes">Observações</label><textarea id="finance-notes" name="observacoes" maxlength="20000" rows="8">${escapeHtml(current?.observacoes || '')}</textarea></div>
           <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar lançamento</button></div>
         </form>
       </section>
@@ -905,7 +917,7 @@
         try { users = await api('listUsers'); } catch (_) {}
       }
       await loadOwnPhoto();
-      const firstPage = ['dashboard','finance','users','clients','settings'].find(canAccess);
+      const firstPage = ['dashboard','orders','finance','users','clients','settings'].find(canAccess);
       if (firstPage) navigate(firstPage);
       else {
         document.querySelector('#page-title').textContent = 'Acesso restrito';
