@@ -6,14 +6,17 @@
   let user = JSON.parse(sessionStorage.getItem('solo_user') || 'null');
   let users = [];
   let clients = [];
+  let suppliers = [];
   let clientsTab = 'editor';
+  let suppliersTab = 'editor';
   let editingClientId = '';
+  let editingSupplierId = '';
   let selectedAccess = null;
   let settingsTab = 'access';
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
-    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients');
+    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers');
   }
   let activePage = 'dashboard';
   let editingId = '';
@@ -51,12 +54,16 @@
       validateSession:'Validando acesso',
       listUsers:'Carregando usuários',
       listClients:'Carregando clientes',
+      listSuppliers:'Carregando fornecedores',
       listOrders:'Carregando pedidos',
       retryOrder:'Concluindo gravação do pedido',
       deleteOrder:'Excluindo pedido',
       createClient:'Salvando cliente',
       updateClient:'Salvando cliente',
       deleteClient:'Excluindo cliente',
+      createSupplier:'Salvando fornecedor',
+      updateSupplier:'Salvando fornecedor',
+      deleteSupplier:'Excluindo fornecedor',
       getModuleAccess:'Carregando permissões',
       saveModuleAccess:'Salvando permissões',
       listFinanceReceivables:'Carregando contas a receber',
@@ -123,17 +130,18 @@
       return;
     }
     activePage = page;
-    if (['users','clients'].includes(page)) {
+    if (['users','clients','suppliers'].includes(page)) {
       document.querySelector('#registrations-items').hidden = false;
       document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
     }
-    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients'].includes(page));
+    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') renderDashboard();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
+    else if (page === 'suppliers') void loadSuppliersPage();
     else if (page === 'orders') void loadOrdersPage();
     else if (page === 'finance') void loadFinancePage();
     else if (page === 'settings') void loadSettingsPage();
@@ -216,6 +224,12 @@
                 <td><span class="badge">CSV</span></td>
                 <td>Cadastro de clientes da SOLO com nome completo, e-mail, WhatsApp (com DDD) e data de cadastro.</td>
                 <td><code>CLIENTS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>fornecedores.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Cadastro de fornecedores da SOLO com fornecedor, e-mail, WhatsApp, endereço, cidade, UF, tipo de produto e observações.</td>
+                <td><code>SUPPLIERS_FILE_ID</code></td>
               </tr>
               <tr>
                 <td><b>pedidos.csv</b></td>
@@ -372,7 +386,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','clients','orders','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','suppliers','orders','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -503,6 +517,103 @@
         clientsTab = 'list';
         if (activePage === 'clients') renderClients();
         toast('Cliente excluído.');
+      } catch (error) { button.disabled = false; toast(error.message,true); }
+    }));
+  }
+
+  const UF_LIST = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+
+  async function loadSuppliersPage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando fornecedores…</div>';
+    try {
+      suppliers = await api('listSuppliers');
+      if (activePage === 'suppliers') renderSuppliers();
+    } catch (error) {
+      if (activePage === 'suppliers') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+    }
+  }
+  function supplierRows(filter = '') {
+    const query = filter.trim().toLocaleLowerCase('pt-BR');
+    const digits = query.replace(/\D/g,'');
+    const visible = suppliers.filter(item => `${item.fornecedor} ${item.email} ${formatWhatsapp(item.whatsapp)} ${item.cidade} ${item.uf} ${item.endereco} ${item.tipo_produto} ${item.observacoes}`.toLocaleLowerCase('pt-BR').includes(query) || (digits.length >= 3 && /^[+\d() .-]+$/.test(query) && item.whatsapp.includes(digits)));
+    if (!visible.length) return '<div class="empty">Nenhum fornecedor encontrado.</div>';
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Fornecedor</th><th>Contato</th><th>Localização</th><th>Produto fornecido</th><th>Ações</th></tr></thead><tbody>${visible.map(item => `<tr>
+      <td><b>${escapeHtml(item.fornecedor)}</b>${item.observacoes ? `<small class="order-contact" title="${escapeHtml(item.observacoes)}">${escapeHtml(item.observacoes.length > 55 ? item.observacoes.slice(0,52) + '…' : item.observacoes)}</small>` : ''}</td>
+      <td>${escapeHtml(item.email)}<small class="order-contact"><a class="whatsapp-cell-link" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar no WhatsApp">${whatsappSvg}<span>${escapeHtml(formatWhatsapp(item.whatsapp))}</span></a></small></td>
+      <td><span>${escapeHtml(item.cidade ? `${item.cidade}/${item.uf}` : item.uf || '—')}</span><small class="order-contact">${escapeHtml(item.endereco || '—')}</small></td>
+      <td><span class="badge">${escapeHtml(item.tipo_produto || 'Geral')}</span></td>
+      <td><div class="row-actions"><a class="tiny-button whatsapp" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar com ${escapeHtml(item.fornecedor)} no WhatsApp">${whatsappSvg} WhatsApp</a><button class="tiny-button" type="button" data-supplier-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-supplier-delete="${escapeHtml(item.id)}">Excluir</button></div></td>
+    </tr>`).join('')}</tbody></table></div>`;
+  }
+  function renderSuppliers() {
+    const current = suppliers.find(item => item.id === editingSupplierId);
+    workspace.innerHTML = `<div class="users-tabs" role="tablist" aria-label="Cadastro de fornecedores">
+      <button class="users-tab ${suppliersTab === 'editor' ? 'active' : ''}" type="button" role="tab" data-suppliers-tab="editor" aria-selected="${suppliersTab === 'editor'}">Cadastro / edição</button>
+      <button class="users-tab ${suppliersTab === 'list' ? 'active' : ''}" type="button" role="tab" data-suppliers-tab="list" aria-selected="${suppliersTab === 'list'}">Fornecedores cadastrados <span>${suppliers.length}</span></button></div>
+      <section class="content-card users-tab-panel" data-suppliers-panel="editor" ${suppliersTab === 'editor' ? '' : 'hidden'}>
+        <div class="card-head"><div><h2>${current ? 'Editar fornecedor' : 'Cadastrar fornecedor'}</h2><p>Preencha os dados cadastrais do fornecedor de produtos ou insumos.</p></div></div>
+        <form id="supplier-form" class="editor">
+          <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
+          <input type="hidden" name="expected_updated_at" value="${escapeHtml(current?.atualizado_em || '')}">
+          <div class="field full"><label for="supplier-name">Fornecedor / Razão social</label><input id="supplier-name" name="fornecedor" maxlength="180" minlength="2" value="${escapeHtml(current?.fornecedor || '')}" placeholder="Nome da empresa ou fornecedor" required></div>
+          <div class="field"><label for="supplier-email">E-mail</label><input id="supplier-email" name="email" type="email" maxlength="254" autocomplete="email" value="${escapeHtml(current?.email || '')}" placeholder="fornecedor@exemplo.com.br" required></div>
+          <div class="field"><label for="supplier-whatsapp">WhatsApp</label><input id="supplier-whatsapp" name="whatsapp" type="tel" maxlength="24" autocomplete="tel" placeholder="(11) 99999-9999" value="${escapeHtml(formatWhatsapp(current?.whatsapp || ''))}" required><small class="helper">Informe o DDD com 10 a 11 dígitos.</small></div>
+          <div class="field full"><label for="supplier-product">Tipo de produto fornecido</label><input id="supplier-product" name="tipo_produto" maxlength="180" value="${escapeHtml(current?.tipo_produto || '')}" placeholder="Ex: Queijos artesanais, Frios, Pães, Embalagens" required></div>
+          <div class="field full"><label for="supplier-address">Endereço</label><input id="supplier-address" name="endereco" maxlength="250" value="${escapeHtml(current?.endereco || '')}" placeholder="Rua, número, complemento, bairro"></div>
+          <div class="field"><label for="supplier-city">Cidade</label><input id="supplier-city" name="cidade" maxlength="100" value="${escapeHtml(current?.cidade || '')}" placeholder="Cidade"></div>
+          <div class="field"><label for="supplier-uf">UF</label><select id="supplier-uf" name="uf"><option value="">Selecione o estado</option>${UF_LIST.map(uf => `<option value="${uf}" ${(current?.uf || 'SP') === uf ? 'selected' : ''}>${uf}</option>`).join('')}</select></div>
+          <div class="field full"><label for="supplier-notes">Observações</label><textarea id="supplier-notes" name="observacoes" rows="4" maxlength="10000" placeholder="Prazos de entrega, condições de pagamento, contatos de representantes…">${escapeHtml(current?.observacoes || '')}</textarea></div>
+          <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar fornecedor</button></div>
+        </form></section>
+      <section class="content-card users-tab-panel" data-suppliers-panel="list" ${suppliersTab === 'list' ? '' : 'hidden'}>
+        <div class="card-head"><div><h2>Fornecedores cadastrados</h2><p>${suppliers.length} registros disponíveis</p></div><div class="toolbar"><input id="suppliers-search" aria-label="Buscar fornecedores" placeholder="Buscar fornecedores…"></div></div>
+        <div id="suppliers-table">${supplierRows()}</div></section>`;
+    const form = document.querySelector('#supplier-form');
+    const search = document.querySelector('#suppliers-search');
+    workspace.querySelectorAll('[data-suppliers-tab]').forEach(button => button.addEventListener('click', () => {
+      suppliersTab = button.dataset.suppliersTab;
+      workspace.querySelectorAll('[data-suppliers-tab]').forEach(tab => { const active = tab.dataset.suppliersTab === suppliersTab; tab.classList.toggle('active',active); tab.setAttribute('aria-selected',String(active)); });
+      workspace.querySelectorAll('[data-suppliers-panel]').forEach(panel => panel.hidden = panel.dataset.suppliersPanel !== suppliersTab);
+      if (suppliersTab === 'list') search.focus();
+    }));
+    form.elements.whatsapp.addEventListener('blur', event => {
+      if (/^[+\d() .-]+$/.test(event.target.value)) event.target.value = formatWhatsapp(event.target.value);
+    });
+    form.addEventListener('reset', event => { event.preventDefault(); editingSupplierId = ''; renderSuppliers(); });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const button = form.querySelector('[type="submit"]'); button.disabled = true;
+      const record = Object.fromEntries(new FormData(form).entries());
+      try {
+        const saved = await api(record.id ? 'updateSupplier' : 'createSupplier', {record});
+        const index = suppliers.findIndex(item => item.id === saved.id);
+        if (index >= 0) suppliers[index] = saved; else suppliers.push(saved);
+        editingSupplierId = ''; suppliersTab = 'list';
+        if (activePage === 'suppliers') renderSuppliers();
+        toast('Fornecedor salvo com sucesso.');
+      } catch (error) { toast(error.message,true); }
+      finally { button.disabled = false; }
+    });
+    search.addEventListener('input', () => { document.querySelector('#suppliers-table').innerHTML = supplierRows(search.value); bindSupplierActions(); });
+    bindSupplierActions();
+  }
+  function bindSupplierActions() {
+    workspace.querySelectorAll('[data-supplier-edit]').forEach(button => button.addEventListener('click', () => {
+      editingSupplierId = button.dataset.supplierEdit; suppliersTab = 'editor'; renderSuppliers();
+      workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});
+    }));
+    workspace.querySelectorAll('[data-supplier-delete]').forEach(button => button.addEventListener('click', async () => {
+      const selected = suppliers.find(item => item.id === button.dataset.supplierDelete);
+      if (!selected || !confirm(`Excluir o fornecedor ${selected.fornecedor}?`)) return;
+      button.disabled = true;
+      try {
+        await api('deleteSupplier', {id:selected.id,version:selected.atualizado_em});
+        suppliers = suppliers.filter(item => item.id !== selected.id);
+        if (editingSupplierId === selected.id) editingSupplierId = '';
+        suppliersTab = 'list';
+        if (activePage === 'suppliers') renderSuppliers();
+        toast('Fornecedor excluído.');
       } catch (error) { button.disabled = false; toast(error.message,true); }
     }));
   }

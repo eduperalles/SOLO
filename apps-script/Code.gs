@@ -2,14 +2,15 @@ const DRIVE_FOLDER_ID_ = '1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva';
 const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status','foto_arquivo_id','foto_atualizada_em','criado_em','atualizado_em'];
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em','cliente_id','pedido_id'];
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','orders','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const SUPPLIER_COLUMNS_ = ['id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','orders','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -44,6 +45,10 @@ function dispatch_(request) {
     case 'createClient': return saveClient_(actor, request.record || {}, 'create');
     case 'updateClient': return saveClient_(actor, request.record || {}, 'update');
     case 'deleteClient': return deleteClient_(actor, request.id, request.version);
+    case 'listSuppliers': module_(actor, 'suppliers'); return readSuppliers_();
+    case 'createSupplier': return saveSupplier_(actor, request.record || {}, 'create');
+    case 'updateSupplier': return saveSupplier_(actor, request.record || {}, 'update');
+    case 'deleteSupplier': return deleteSupplier_(actor, request.id, request.version);
     case 'getUserPhotos': return getUserPhotos_(actor, request.ids);
     case 'createUser': return saveUser_(actor, request.record || {}, 'create');
     case 'updateUser': return saveUser_(actor, request.record || {}, 'update');
@@ -121,15 +126,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.filter(key => !['clients','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,orders:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,orders:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -152,11 +157,11 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
@@ -231,6 +236,98 @@ function deleteClient_(actor, id, version) {
     if (String(version || '') !== selected.atualizado_em) throw Error('Cliente atualizado por outra sessão. Atualize a lista antes de excluir.');
     if (PropertiesService.getScriptProperties().getProperty('ORDERS_FILE_ID') && readOrders_().some(order => order.cliente_id === selected.id)) throw Error('Este cliente possui pedidos vinculados e não pode ser excluído.');
     saveClientRows_(rows.filter(row => row.id !== selected.id));
+    return {deleted:true};
+  });
+}
+
+function setupSuppliers() {
+  return withLock_(() => {
+    const file = getSuppliersFile_();
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty('SUPPLIERS_FILE_ID', file.getId());
+    const accessId = props.getProperty('SETTINGS_FILE_ID');
+    if (accessId) {
+      const rows = readAccess_();
+      rows.forEach(row => { if (row.suppliers === undefined) row.suppliers = '0'; });
+      DriveApp.getFileById(accessId).setContent(csv_(ACCESS_COLUMNS_, rows));
+    }
+    return 'Cadastro de fornecedores pronto; fornecedores.csv na pasta SOLO e permissões existentes preservadas.';
+  });
+}
+
+function getSuppliersFile_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('SUPPLIERS_FILE_ID');
+  if (id) {
+    try {
+      return DriveApp.getFileById(id);
+    } catch (_) {}
+  }
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const files = folder.getFilesByName('fornecedores.csv');
+  const file = files.hasNext() ? files.next() : folder.createFile('fornecedores.csv', csv_(SUPPLIER_COLUMNS_, []), 'text/csv');
+  props.setProperty('SUPPLIERS_FILE_ID', file.getId());
+  return file;
+}
+
+function readSuppliers_() {
+  const file = getSuppliersFile_();
+  const text = file.getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (SUPPLIER_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de fornecedores.csv inválido.');
+  return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
+}
+
+function saveSupplierRows_(rows) {
+  const file = getSuppliersFile_();
+  file.setContent(csv_(SUPPLIER_COLUMNS_, rows));
+}
+
+function saveSupplier_(actor, input, operation) {
+  module_(actor, 'suppliers');
+  const id = String(input.id || '');
+  const fornecedor = String(input.fornecedor || '').trim();
+  const email = normalizeEmail_(input.email);
+  const rawWhatsapp = String(input.whatsapp || '').trim();
+  const whatsapp = rawWhatsapp.replace(/\D/g, '');
+  const endereco = String(input.endereco || '').trim();
+  const cidade = String(input.cidade || '').trim();
+  const uf = String(input.uf || '').trim().toUpperCase();
+  const tipo_produto = String(input.tipo_produto || '').trim();
+  const observacoes = String(input.observacoes || '').trim();
+
+  if (fornecedor.length < 2 || fornecedor.length > 180) throw Error('Informe o nome do fornecedor (2 a 180 caracteres).');
+  if (!validEmail_(email)) throw Error('Informe um e-mail válido.');
+  if (!/^[+\d() .-]+$/.test(rawWhatsapp) || !/^\d{10,15}$/.test(whatsapp)) throw Error('Informe um WhatsApp válido com DDD (10 a 15 dígitos).');
+  if (endereco.length > 250) throw Error('O endereço deve conter até 250 caracteres.');
+  if (cidade.length > 100) throw Error('A cidade deve conter até 100 caracteres.');
+  if (uf && !/^[A-Z]{2}$/.test(uf)) throw Error('Informe uma UF válida de 2 letras (ex: SP).');
+  if (tipo_produto.length > 180) throw Error('O tipo de produto deve conter até 180 caracteres.');
+  if (observacoes.length > 10000) throw Error('As observações devem conter até 10.000 caracteres.');
+
+  return withLock_(() => {
+    const rows = readSuppliers_();
+    const index = operation === 'update' ? rows.findIndex(row => row.id === id) : -1;
+    const old = rows[index];
+    if (operation === 'update' && !old) throw Error('Fornecedor não encontrado.');
+    if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Fornecedor atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+    const stamp = now_();
+    const record = {id:old ? old.id : Utilities.getUuid(),fornecedor,email,whatsapp,endereco,cidade,uf,tipo_produto,observacoes,criado_em:old ? old.criado_em : stamp,atualizado_em:stamp};
+    if (old) rows[index] = record; else rows.push(record);
+    saveSupplierRows_(rows);
+    return record;
+  });
+}
+
+function deleteSupplier_(actor, id, version) {
+  module_(actor, 'suppliers');
+  return withLock_(() => {
+    const rows = readSuppliers_();
+    const selected = rows.find(row => row.id === String(id || ''));
+    if (!selected) throw Error('Fornecedor não encontrado.');
+    if (String(version || '') !== selected.atualizado_em) throw Error('Fornecedor atualizado por outra sessão. Atualize a lista antes de excluir.');
+    saveSupplierRows_(rows.filter(row => row.id !== selected.id));
     return {deleted:true};
   });
 }
