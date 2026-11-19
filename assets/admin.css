@@ -123,6 +123,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--gold); box-shado
 .row-actions { display: flex; gap: 7px; }
 .tiny-button { border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink); padding: 6px 8px; font-size: 11px; }
 .tiny-button.danger { color: var(--danger); }
+.tiny-button.whatsapp { color: #128c7e; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; font-weight: 500; border-color: #c2ebd5; }
+.tiny-button.whatsapp svg { flex-shrink: 0; }
+.tiny-button.whatsapp:hover { border-color: #25d366; background: #f2fbf6; color: #075e54; }
+.whatsapp-cell-link { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); text-decoration: none; font-weight: 500; }
+.whatsapp-cell-link svg { color: #25d366; flex-shrink: 0; }
+.whatsapp-cell-link:hover { color: #128c7e; text-decoration: underline; }
 .tiny-button:disabled { color: #a7a09a; background: #f3f1ed; cursor: not-allowed; opacity: .7; }
 .users-tabs { display: flex; gap: 5px; width: fit-content; max-width: 100%; margin-bottom: 12px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: #ece8df; }
 .users-tab { border: 0; border-radius: 7px; background: transparent; color: var(--muted); padding: 10px 16px; font-size: 12px; font-weight: 700; }

@@ -244,6 +244,13 @@
     if (national.length === 10) return prefix + national.replace(/^(\d{2})(\d{4})(\d{4})$/, '($1) $2-$3');
     return digits;
   }
+  const whatsappSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91C2.13 13.66 2.59 15.36 3.45 16.86L2.05 22L7.3 20.62C8.75 21.41 10.38 21.83 12.04 21.83C17.5 21.83 21.95 17.38 21.95 11.92C21.95 9.27 20.92 6.78 19.05 4.91C17.18 3.04 14.69 2 12.04 2M12.05 3.67C14.25 3.67 16.31 4.53 17.87 6.09C19.42 7.65 20.28 9.72 20.28 11.92C20.28 16.46 16.58 20.15 12.04 20.15C10.56 20.15 9.11 19.76 7.85 19L7.55 18.83L4.43 19.65L5.26 16.61L5.06 16.29C4.24 15 3.8 13.47 3.8 11.91C3.81 7.37 7.5 3.67 12.05 3.67M9.11 6.84C8.94 6.84 8.66 6.9 8.42 7.16C8.18 7.42 7.5 8.06 7.5 9.36C7.5 10.66 8.45 11.92 8.58 12.09C8.71 12.26 10.42 14.91 13.06 16.05C15.25 17 15.7 16.82 16.18 16.78C16.66 16.73 17.73 16.14 17.95 15.52C18.17 14.91 18.17 14.38 18.11 14.28C18.05 14.18 17.88 14.11 17.62 13.98C17.36 13.85 16.08 13.22 15.84 13.13C15.61 13.05 15.44 13.01 15.27 13.27C15.1 13.53 14.61 14.11 14.46 14.28C14.31 14.46 14.16 14.48 13.9 14.35C13.64 14.22 12.8 13.95 11.81 13.07C11.04 12.38 10.52 11.53 10.37 11.27C10.22 11.01 10.35 10.87 10.48 10.74C10.6 10.62 10.74 10.43 10.88 10.28C11.02 10.12 11.07 10.01 11.16 9.84C11.24 9.67 11.2 9.52 11.14 9.39C11.07 9.26 10.58 8.06 10.38 7.57C10.18 7.09 9.98 7.15 9.83 7.15C9.69 7.14 9.52 7.14 9.35 7.14L9.11 6.84Z"/></svg>';
+  function whatsappUrl(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '#';
+    const number = digits.length === 10 || digits.length === 11 ? '55' + digits : digits;
+    return `https://wa.me/${number}`;
+  }
   async function loadOrdersPage() {
     workspace.innerHTML='<div class="workspace-state">Carregando pedidos…</div>';
     try {
@@ -279,8 +286,8 @@
     if (!visible.length) return '<div class="empty">Nenhum cliente encontrado.</div>';
     return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Cliente</th><th>E-mail</th><th>WhatsApp</th><th>Data de cadastro</th><th>Ações</th></tr></thead><tbody>${visible.map(item => `<tr>
       <td><span class="user-cell">${avatarMarkup(item)}<b>${escapeHtml(item.nome)}</b></span></td>
-      <td>${escapeHtml(item.email)}</td><td>${escapeHtml(formatWhatsapp(item.whatsapp))}</td><td>${escapeHtml(displayClientDate(item.data_cadastro))}</td>
-      <td><div class="row-actions"><button class="tiny-button" type="button" data-client-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-client-delete="${escapeHtml(item.id)}">Excluir</button></div></td>
+      <td>${escapeHtml(item.email)}</td><td><a class="whatsapp-cell-link" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar no WhatsApp">${whatsappSvg}<span>${escapeHtml(formatWhatsapp(item.whatsapp))}</span></a></td><td>${escapeHtml(displayClientDate(item.data_cadastro))}</td>
+      <td><div class="row-actions"><a class="tiny-button whatsapp" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar com ${escapeHtml(item.nome)} no WhatsApp">${whatsappSvg} WhatsApp</a><button class="tiny-button" type="button" data-client-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-client-delete="${escapeHtml(item.id)}">Excluir</button></div></td>
     </tr>`).join('')}</tbody></table></div>`;
   }
   function renderClients() {
