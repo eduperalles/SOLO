@@ -27,6 +27,7 @@ function dispatch_(request) {
     case 'logout': return logout_(request);
     case 'validateSession': return publicUser_(actor);
     case 'listUsers': admin_(actor); return readUsers_().map(adminUser_);
+    case 'getUserPhotos': return getUserPhotos_(actor, request.ids);
     case 'createUser': return saveUser_(actor, request.record || {}, 'create');
     case 'updateUser': return saveUser_(actor, request.record || {}, 'update');
     case 'deleteUser': return deleteUser_(actor, request.id);
@@ -406,6 +407,29 @@ function publicUser_(user) {
 
 function adminUser_(user) {
   return publicUser_(user);
+}
+
+function getUserPhotos_(actor, rawIds) {
+  admin_(actor);
+  const ids = [...new Set((Array.isArray(rawIds) ? rawIds : []).map(id => String(id || '').trim()).filter(Boolean))].slice(0, 50);
+  const photos = {};
+  if (!ids.length) return {photos};
+  const rows = readUsers_();
+  ids.forEach(id => {
+    const user = rows.find(row => row.id === id);
+    if (!user || !user.foto_arquivo_id) return;
+    try {
+      const blob = photoFile_(user).getBlob();
+      const bytes = blob.getBytes();
+      const mime = blob.getContentType();
+      if (!['image/jpeg','image/png'].includes(mime) || bytes.length > 300000) return;
+      photos[id] = {
+        photo_data_url:'data:' + mime + ';base64,' + Utilities.base64Encode(bytes),
+        version:user.foto_atualizada_em || ''
+      };
+    } catch (_) {}
+  });
+  return {photos};
 }
 
 function json_(value) {

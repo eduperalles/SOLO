@@ -8,9 +8,13 @@
   let activePage = 'dashboard';
   let editingId = '';
   let usersTab = 'editor';
-  let financeTab = 'receivables';
+  let financeTab = 'dashboard';
+  let financeSubTab = 'records';
+  let financeMonth = '';
+  let financeYear = String(new Date().getFullYear());
   let financeRows = {receivables:[], payables:[]};
   let editingFinanceId = '';
+  const userPhotos = new Map();
   let profile = null;
   let profilePhoto = '';
   let image = null;
@@ -120,6 +124,7 @@
     try {
       users = await api('listUsers');
       renderUsers();
+      void hydrateUserPhotos(users);
     } catch (error) {
       workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
       if (/sessão|session|autentic/i.test(error.message)) clearSession();
@@ -131,7 +136,7 @@
     if (!visible.length) return '<div class="empty">Nenhum usuário encontrado.</div>';
     return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Status</th><th>Ações</th></tr></thead><tbody>${visible.map(item => `
       <tr>
-        <td><span class="user-cell">${avatarMarkup(item)}<b>${escapeHtml(item.nome)}</b></span></td>
+        <td><span class="user-cell">${avatarMarkup(item, '', userPhotos.get(item.id) || (item.id === user?.id ? profilePhoto : ''))}<b>${escapeHtml(item.nome)}</b></span></td>
         <td>${escapeHtml(item.email)}</td>
         <td>${item.perfil === 'admin' ? 'Administrador' : 'Operador'}</td>
         <td><span class="badge ${item.status === 'ativo' ? '' : 'inactive'}">${item.status === 'ativo' ? 'Ativo' : 'Inativo'}</span></td>
@@ -256,11 +261,29 @@
   const money = value => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(Number(value) || 0);
   const financeLabel = type => type === 'receivables' ? 'Contas a receber' : 'Contas a pagar';
   const financePersonLabel = type => type === 'receivables' ? 'Cliente / responsável' : 'Fornecedor / beneficiário';
-  function financeRowsMarkup(type, query = '') {
+  function hydrateUserPhotos(list) {
+    const ids = list.filter(item => item.has_photo && !userPhotos.has(item.id)).map(item => item.id).slice(0, 50);
+    if (!ids.length) return Promise.resolve();
+    return api('getUserPhotos', {ids}).then(result => {
+      Object.entries(result.photos || {}).forEach(([id, photo]) => {
+        if (photo.photo_data_url) userPhotos.set(id, photo.photo_data_url);
+      });
+      if (activePage === 'users') {
+        const search = document.querySelector('#users-search');
+        const table = document.querySelector('#users-table');
+        if (table) table.innerHTML = userRows(search?.value || '');
+        bindTableActions();
+      }
+    }).catch(() => {});
+  }
+  function financeRowsMarkup(type, query = '', month = '', year = '') {
     const search = query.trim().toLocaleLowerCase('pt-BR');
-    const rows = financeRows[type].filter(row =>
-      `${row.descricao} ${row.pessoa} ${row.categoria} ${row.status}`.toLocaleLowerCase('pt-BR').includes(search)
-    );
+    const rows = financeRows[type].filter(row => {
+      const date = String(row.status === 'pago' ? row.data_pagamento : row.data_vencimento);
+      return `${row.descricao} ${row.pessoa} ${row.categoria} ${row.status}`.toLocaleLowerCase('pt-BR').includes(search)
+        && (!year || date.startsWith(year))
+        && (!month || date.slice(5, 7) === month);
+    });
     if (!rows.length) return '<div class="empty">Nenhum lançamento financeiro encontrado.</div>';
     return `<div class="data-table-wrap"><table class="data-table finance-table"><thead><tr><th>Descrição</th><th>${financePersonLabel(type)}</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead><tbody>${rows.map(row => `
       <tr>
@@ -277,27 +300,103 @@
     const [year, month, day] = value.split('-');
     return `${day}/${month}/${year}`;
   }
+  function parseCurrency(value) {
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits) return '';
+    return (Number(digits) / 100).toFixed(2);
+  }
+  function maskCurrency(value) {
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits) return '';
+    return new Intl.NumberFormat('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Number(digits) / 100);
+  }
+  function financeMonthOptions(selected = financeMonth) {
+    const names = ['Todos os meses','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    return names.map((name, index) => `<option value="${index ? String(index).padStart(2,'0') : ''}" ${selected === (index ? String(index).padStart(2,'0') : '') ? 'selected' : ''}>${name}</option>`).join('');
+  }
+  function financeYearOptions() {
+    const current = new Date().getFullYear();
+    const years = new Set([current, ...financeRows.receivables.concat(financeRows.payables).map(row => Number(String(row.data_vencimento || row.data_pagamento).slice(0,4))).filter(Boolean)]);
+    return [...years].sort((a,b) => b-a).map(year => `<option value="${year}" ${String(year) === financeYear ? 'selected' : ''}>${year}</option>`).join('');
+  }
+  function financeDashboardMarkup() {
+    const rows = [...financeRows.receivables, ...financeRows.payables];
+    const periodRows = rows.filter(row => {
+      const date = String(row.status === 'pago' ? row.data_pagamento : row.data_vencimento);
+      return (!financeYear || date.startsWith(financeYear)) && (!financeMonth || date.slice(5,7) === financeMonth);
+    });
+    const receivables = periodRows.filter((_, index) => index < financeRows.receivables.length && financeRows.receivables.includes(_));
+    const payables = periodRows.filter((_, index) => financeRows.payables.includes(_));
+    const receivePending = receivables.filter(row => row.status === 'pendente').reduce((sum,row) => sum + Number(row.valor), 0);
+    const receivePaid = receivables.filter(row => row.status === 'pago').reduce((sum,row) => sum + Number(row.valor), 0);
+    const payPending = payables.filter(row => row.status === 'pendente').reduce((sum,row) => sum + Number(row.valor), 0);
+    const payPaid = payables.filter(row => row.status === 'pago').reduce((sum,row) => sum + Number(row.valor), 0);
+    const values = [receivePaid, receivePending, payPaid, payPending];
+    const max = Math.max(1, ...values);
+    const bars = [
+      ['Recebido', receivePaid, 'received'],
+      ['A receber', receivePending, 'pending'],
+      ['Pago', payPaid, 'paid'],
+      ['A pagar', payPending, 'overdue']
+    ];
+    const balance = receivePaid - payPaid;
+    return `
+      <section class="finance-period">
+        <label>Mês<select id="finance-dashboard-month">${financeMonthOptions()}</select></label>
+        <label>Ano<select id="finance-dashboard-year">${financeYearOptions()}</select></label>
+      </section>
+      <div class="stats finance-stats">
+        <div class="stat"><span>Saldo realizado</span><strong class="${balance < 0 ? 'negative-value' : ''}">${money(balance)}</strong></div>
+        <div class="stat"><span>Total a receber</span><strong>${money(receivePending)}</strong></div>
+        <div class="stat"><span>Total a pagar</span><strong>${money(payPending)}</strong></div>
+      </div>
+      <section class="content-card finance-chart-card">
+        <div class="card-head"><div><h2>Visão financeira</h2><p>Valores do período selecionado.</p></div></div>
+        <div class="finance-bars" role="img" aria-label="Gráfico dos valores realizados e pendentes">
+          ${bars.map(([label,value,type]) => `<div class="finance-bar-item"><div class="finance-bar-label"><span>${label}</span><strong>${money(value)}</strong></div><div class="finance-bar-track"><span class="finance-bar ${type}" style="width:${Math.max(value ? 2 : 0, value/max*100)}%"></span></div></div>`).join('')}
+        </div>
+      </section>
+      <section class="content-card">
+        <div class="card-head"><div><h2>Fluxo por categoria</h2><p>Receitas e despesas cadastradas no período.</p></div></div>
+        ${categoryChartMarkup(receivables, payables)}
+      </section>`;
+  }
+  function categoryChartMarkup(receivables, payables) {
+    const totals = new Map();
+    receivables.forEach(row => { const key=row.categoria || 'Sem categoria'; totals.set(key,(totals.get(key)||0)+Number(row.valor)); });
+    payables.forEach(row => { const key=row.categoria || 'Sem categoria'; totals.set(key,(totals.get(key)||0)-Number(row.valor)); });
+    const entries=[...totals].sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,6);
+    if (!entries.length) return '<div class="empty">Cadastre lançamentos para visualizar o fluxo por categoria.</div>';
+    const max=Math.max(1,...entries.map(([,value])=>Math.abs(value)));
+    return `<div class="category-chart">${entries.map(([name,value])=>`<div><span>${escapeHtml(name)}</span><i><b class="${value<0?'negative':''}" style="width:${Math.abs(value)/max*100}%"></b></i><strong>${money(value)}</strong></div>`).join('')}</div>`;
+  }
   function renderFinance() {
+    if (financeTab === 'dashboard') {
+      workspace.innerHTML = `${financeMainTabs()}${financeDashboardMarkup()}`;
+      bindFinance();
+      return;
+    }
     const current = financeRows[financeTab].find(row => row.id === editingFinanceId);
     const type = financeTab;
     workspace.innerHTML = `
-      <div class="users-tabs finance-tabs" role="tablist" aria-label="Módulo financeiro">
-        <button class="users-tab ${type === 'receivables' ? 'active' : ''}" type="button" role="tab" data-finance-tab="receivables" aria-selected="${type === 'receivables'}">Contas a receber <span>${financeRows.receivables.length}</span></button>
-        <button class="users-tab ${type === 'payables' ? 'active' : ''}" type="button" role="tab" data-finance-tab="payables" aria-selected="${type === 'payables'}">Contas a pagar <span>${financeRows.payables.length}</span></button>
-      </div>
+      ${financeMainTabs()}
       <section class="content-card finance-summary">
         <div><span>Total pendente</span><strong>${money(financeRows[type].filter(row => row.status === 'pendente').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
         <div><span>Total pago</span><strong>${money(financeRows[type].filter(row => row.status === 'pago').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
         <div><span>Lançamentos</span><strong>${financeRows[type].length}</strong></div>
       </section>
-      <section class="content-card">
+      <div class="users-tabs finance-subtabs" role="tablist" aria-label="${financeLabel(type)}">
+        <button class="users-tab ${financeSubTab === 'records' ? 'active' : ''}" type="button" role="tab" data-finance-subtab="records" aria-selected="${financeSubTab === 'records'}">Registros</button>
+        <button class="users-tab ${financeSubTab === 'register' ? 'active' : ''}" type="button" role="tab" data-finance-subtab="register" aria-selected="${financeSubTab === 'register'}">Cadastro</button>
+      </div>
+      <section class="content-card" data-finance-panel="register" ${financeSubTab === 'register' ? '' : 'hidden'}>
         <div class="card-head"><div><h2>${current ? 'Editar lançamento' : `Nova ${type === 'receivables' ? 'conta a receber' : 'conta a pagar'}`}</h2><p>${financeLabel(type)}.</p></div></div>
         <form id="finance-form" class="editor" novalidate>
           <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
           <div class="field"><label for="finance-description">Descrição *</label><input id="finance-description" name="descricao" maxlength="180" value="${escapeHtml(current?.descricao || '')}" required></div>
           <div class="field"><label for="finance-person">${financePersonLabel(type)}</label><input id="finance-person" name="pessoa" maxlength="180" value="${escapeHtml(current?.pessoa || '')}"></div>
           <div class="field"><label for="finance-category">Categoria</label><input id="finance-category" name="categoria" maxlength="120" value="${escapeHtml(current?.categoria || '')}" placeholder="Ex.: Serviços, fornecedores"></div>
-          <div class="field"><label for="finance-value">Valor (R$) *</label><input id="finance-value" name="valor" type="number" min="0.01" step="0.01" inputmode="decimal" value="${escapeHtml(current?.valor || '')}" required></div>
+          <div class="field"><label for="finance-value">Valor (R$) *</label><input id="finance-value" name="valor" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.valor)*100) : '')}" placeholder="0,00" required></div>
           <div class="field"><label for="finance-due">Vencimento *</label><input id="finance-due" name="data_vencimento" type="date" value="${escapeHtml(current?.data_vencimento || '')}" required></div>
           <div class="field"><label for="finance-status">Status *</label><select id="finance-status" name="status"><option value="pendente" ${current?.status !== 'pago' ? 'selected' : ''}>Pendente</option><option value="pago" ${current?.status === 'pago' ? 'selected' : ''}>Pago</option></select></div>
           <div class="field"><label for="finance-paid">Data do pagamento</label><input id="finance-paid" name="data_pagamento" type="date" value="${escapeHtml(current?.data_pagamento || '')}" ${current?.status === 'pago' ? '' : 'disabled'}></div>
@@ -305,22 +404,47 @@
           <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar lançamento</button></div>
         </form>
       </section>
-      <section class="content-card">
-        <div class="card-head"><div><h2>${financeLabel(type)}</h2><p>Registros sincronizados com o CSV privado do Drive.</p></div><div class="toolbar"><input id="finance-search" aria-label="Buscar lançamentos" placeholder="Buscar lançamentos…"></div></div>
-        <div id="finance-table">${financeRowsMarkup(type)}</div>
+      <section class="content-card" data-finance-panel="records" ${financeSubTab === 'records' ? '' : 'hidden'}>
+        <div class="card-head"><div><h2>${financeLabel(type)}</h2><p>Registros sincronizados com o CSV privado do Drive.</p></div><div class="toolbar finance-filters"><input id="finance-search" aria-label="Buscar lançamentos" placeholder="Buscar lançamentos…"><select id="finance-filter-month" aria-label="Filtrar por mês">${financeMonthOptions()}</select><select id="finance-filter-year" aria-label="Filtrar por ano"><option value="">Todos os anos</option>${financeYearOptions()}</select></div></div>
+        <div id="finance-table">${financeRowsMarkup(type,'',financeMonth,financeYear)}</div>
       </section>`;
     bindFinance();
   }
+  function financeMainTabs() {
+    return `<div class="users-tabs finance-tabs" role="tablist" aria-label="Módulo financeiro">
+      <button class="users-tab ${financeTab === 'dashboard' ? 'active' : ''}" type="button" role="tab" data-finance-tab="dashboard" aria-selected="${financeTab === 'dashboard'}">Dashboard</button>
+      <button class="users-tab ${financeTab === 'receivables' ? 'active' : ''}" type="button" role="tab" data-finance-tab="receivables" aria-selected="${financeTab === 'receivables'}">Contas a receber <span>${financeRows.receivables.length}</span></button>
+      <button class="users-tab ${financeTab === 'payables' ? 'active' : ''}" type="button" role="tab" data-finance-tab="payables" aria-selected="${financeTab === 'payables'}">Contas a pagar <span>${financeRows.payables.length}</span></button>
+    </div>`;
+  }
   function bindFinance() {
-    const form = document.querySelector('#finance-form');
-    const status = form.querySelector('[name="status"]');
-    const paid = form.querySelector('[name="data_pagamento"]');
-    const search = document.querySelector('#finance-search');
     workspace.querySelectorAll('[data-finance-tab]').forEach(button => button.addEventListener('click', () => {
       financeTab = button.dataset.financeTab;
       editingFinanceId = '';
       renderFinance();
     }));
+    const dashboardMonth = document.querySelector('#finance-dashboard-month');
+    const dashboardYear = document.querySelector('#finance-dashboard-year');
+    if (dashboardMonth) dashboardMonth.addEventListener('change', event => { financeMonth = event.target.value; renderFinance(); });
+    if (dashboardYear) dashboardYear.addEventListener('change', event => { financeYear = event.target.value; renderFinance(); });
+    const form = document.querySelector('#finance-form');
+    if (!form) return;
+    const status = form.querySelector('[name="status"]');
+    const paid = form.querySelector('[name="data_pagamento"]');
+    const value = form.querySelector('[name="valor"]');
+    const search = document.querySelector('#finance-search');
+    const monthFilter = document.querySelector('#finance-filter-month');
+    const yearFilter = document.querySelector('#finance-filter-year');
+    workspace.querySelectorAll('[data-finance-subtab]').forEach(button => button.addEventListener('click', () => {
+      financeSubTab = button.dataset.financeSubtab;
+      workspace.querySelectorAll('[data-finance-subtab]').forEach(tab => {
+        const active = tab.dataset.financeSubtab === financeSubTab;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      workspace.querySelectorAll('[data-finance-panel]').forEach(panel => panel.hidden = panel.dataset.financePanel !== financeSubTab);
+    }));
+    value.addEventListener('input', event => event.target.value = maskCurrency(event.target.value));
     status.addEventListener('change', () => {
       paid.disabled = status.value !== 'pago';
       if (status.value !== 'pago') paid.value = '';
@@ -337,6 +461,7 @@
       const button = form.querySelector('[type="submit"]');
       button.disabled = true;
       const record = Object.fromEntries(new FormData(form).entries());
+      record.valor = parseCurrency(record.valor);
       try {
         const isReceivable = financeTab === 'receivables';
         const saved = await api(isReceivable ? 'saveFinanceReceivable' : 'saveFinancePayable', {record});
@@ -344,6 +469,7 @@
         if (index >= 0) financeRows[financeTab][index] = saved;
         else financeRows[financeTab].push(saved);
         editingFinanceId = '';
+        financeSubTab = 'records';
         renderFinance();
         toast('Lançamento financeiro salvo.');
       } catch (error) {
@@ -353,7 +479,17 @@
       }
     });
     search.addEventListener('input', () => {
-      document.querySelector('#finance-table').innerHTML = financeRowsMarkup(financeTab, search.value);
+      document.querySelector('#finance-table').innerHTML = financeRowsMarkup(financeTab, search.value, financeMonth, financeYear);
+      bindFinanceTableActions();
+    });
+    monthFilter.addEventListener('change', event => {
+      financeMonth = event.target.value;
+      document.querySelector('#finance-table').innerHTML = financeRowsMarkup(financeTab, search.value, financeMonth, financeYear);
+      bindFinanceTableActions();
+    });
+    yearFilter.addEventListener('change', event => {
+      financeYear = event.target.value;
+      document.querySelector('#finance-table').innerHTML = financeRowsMarkup(financeTab, search.value, financeMonth, financeYear);
       bindFinanceTableActions();
     });
     bindFinanceTableActions();
@@ -361,6 +497,7 @@
   function bindFinanceTableActions() {
     workspace.querySelectorAll('[data-finance-edit]').forEach(button => button.addEventListener('click', () => {
       editingFinanceId = button.dataset.financeEdit;
+      financeSubTab = 'register';
       renderFinance();
       document.querySelector('#finance-form')?.scrollIntoView({behavior:'smooth'});
     }));
