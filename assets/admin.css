@@ -38,8 +38,8 @@ img { max-width: 100%; }
   transform: rotate(8deg);
 }
 .login-brand, .login-card, .login-foot { position: relative; z-index: 1; }
-.login-brand { display: block; width: 150px; margin: 0 auto 22px; text-align: center; }
-.login-brand img { display: block; width: 100%; height: auto; }
+.login-brand { display: block; width: 110px; margin: 0 auto 18px; text-align: center; background: transparent; }
+.login-brand img { display: block; width: 100%; height: auto; background: transparent; filter: brightness(0) invert(1); }
 .login-card { width: min(420px, calc(100vw - 32px)); padding: 36px; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; background: rgba(255,255,255,.98); box-shadow: 0 26px 80px rgba(0,0,0,.38); }
 .eyebrow { margin: 0 0 10px; color: var(--gold-dark); font-size: 10px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
 .login-card h1 { margin: 0; font: 700 32px/1.1 "Cormorant Garamond", Georgia, serif; }
@@ -63,7 +63,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--gold); box-shado
 
 .panel-body { display: flex; }
 .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 5; width: 250px; display: flex; flex-direction: column; padding: 28px 17px 20px; background: var(--navy); color: white; }
-.sidebar-brand { display: block; width: 145px; margin: 0 auto 36px; }
+.sidebar-brand { display: block; width: 105px; margin: 0 auto 30px; background: transparent; }
+.sidebar-brand img { display: block; width: 100%; height: auto; background: transparent; filter: brightness(0) invert(1); }
 .side-label { margin: 0 0 12px; padding: 0 13px; color: #90877c; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
 .sidebar nav { display: grid; gap: 6px; }
 .sidebar nav button, .side-bottom button { display: flex; align-items: center; gap: 12px; border: 0; border-radius: 8px; background: transparent; color: #cfc8bd; padding: 12px; text-align: left; }
