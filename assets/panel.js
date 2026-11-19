@@ -7,6 +7,7 @@
   let users = [];
   let activePage = 'dashboard';
   let editingId = '';
+  let usersTab = 'editor';
   let profile = null;
   let profilePhoto = '';
   let image = null;
@@ -117,13 +118,17 @@
         <td>${escapeHtml(item.email)}</td>
         <td>${item.perfil === 'admin' ? 'Administrador' : 'Operador'}</td>
         <td><span class="badge ${item.status === 'ativo' ? '' : 'inactive'}">${item.status === 'ativo' ? 'Ativo' : 'Inativo'}</span></td>
-        <td><div class="row-actions"><button class="tiny-button" type="button" data-edit="${escapeHtml(item.id)}">Editar</button>${item.id === user.id ? '' : `<button class="tiny-button danger" type="button" data-delete="${escapeHtml(item.id)}">Excluir</button>`}</div></td>
+        <td><div class="row-actions"><button class="tiny-button" type="button" data-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-delete="${escapeHtml(item.id)}" ${item.id === user.id ? 'disabled title="Não é possível excluir o usuário atual"' : ''}>Excluir</button></div></td>
       </tr>`).join('')}</tbody></table></div>`;
   }
   function renderUsers() {
     const current = users.find(item => item.id === editingId);
     workspace.innerHTML = `
-      <section class="content-card">
+      <div class="users-tabs" role="tablist" aria-label="Cadastro de usuários">
+        <button class="users-tab ${usersTab === 'editor' ? 'active' : ''}" type="button" role="tab" data-users-tab="editor" aria-selected="${usersTab === 'editor'}">Cadastro / edição</button>
+        <button class="users-tab ${usersTab === 'list' ? 'active' : ''}" type="button" role="tab" data-users-tab="list" aria-selected="${usersTab === 'list'}">Usuários cadastrados <span>${users.length}</span></button>
+      </div>
+      <section class="content-card users-tab-panel" data-users-panel="editor" ${usersTab === 'editor' ? '' : 'hidden'}>
         <div class="card-head"><div><h2>${current ? 'Editar usuário' : 'Cadastrar usuário'}</h2><p>Somente administradores podem criar ou alterar acessos.</p></div></div>
         <form id="user-form" class="editor">
           <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
@@ -135,7 +140,7 @@
           <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar usuário</button></div>
         </form>
       </section>
-      <section class="content-card">
+      <section class="content-card users-tab-panel" data-users-panel="list" ${usersTab === 'list' ? '' : 'hidden'}>
         <div class="card-head"><div><h2>Usuários cadastrados</h2><p>${users.length} registros disponíveis</p></div><div class="toolbar"><input id="users-search" aria-label="Buscar usuários" placeholder="Buscar usuários…"></div></div>
         <div id="users-table">${userRows()}</div>
       </section>`;
@@ -145,6 +150,16 @@
     const form = document.querySelector('#user-form');
     const search = document.querySelector('#users-search');
     const password = form.querySelector('[name="senha"]');
+    workspace.querySelectorAll('[data-users-tab]').forEach(button => button.addEventListener('click', () => {
+      usersTab = button.dataset.usersTab;
+      workspace.querySelectorAll('[data-users-tab]').forEach(tab => {
+        const active = tab.dataset.usersTab === usersTab;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      workspace.querySelectorAll('[data-users-panel]').forEach(panel => panel.hidden = panel.dataset.usersPanel !== usersTab);
+      if (usersTab === 'list') search.focus();
+    }));
     form.querySelector('[data-password-toggle]').addEventListener('click', event => {
       password.type = password.type === 'password' ? 'text' : 'password';
       event.currentTarget.setAttribute('aria-label', password.type === 'text' ? 'Ocultar senha' : 'Mostrar senha');
@@ -167,6 +182,7 @@
         if (index >= 0) users[index] = saved;
         else users.push(saved);
         editingId = '';
+        usersTab = 'list';
         renderUsers();
         toast('Usuário salvo com sucesso.');
       } catch (error) {
@@ -184,16 +200,18 @@
   function bindTableActions() {
     workspace.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', () => {
       editingId = button.dataset.edit;
+      usersTab = 'editor';
       renderUsers();
       workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});
     }));
-    workspace.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', async () => {
+    workspace.querySelectorAll('[data-delete]:not(:disabled)').forEach(button => button.addEventListener('click', async () => {
       const selected = users.find(item => item.id === button.dataset.delete);
       if (!selected || !confirm(`Excluir o usuário ${selected.nome}?`)) return;
       button.disabled = true;
       try {
         await api('deleteUser', {id:selected.id});
         users = users.filter(item => item.id !== selected.id);
+        usersTab = 'list';
         renderUsers();
         toast('Usuário excluído.');
       } catch (error) {

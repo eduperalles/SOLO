@@ -113,6 +113,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--gold); box-shado
 .row-actions { display: flex; gap: 7px; }
 .tiny-button { border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink); padding: 6px 8px; font-size: 11px; }
 .tiny-button.danger { color: var(--danger); }
+.tiny-button:disabled { color: #a7a09a; background: #f3f1ed; cursor: not-allowed; opacity: .7; }
+.users-tabs { display: flex; gap: 5px; width: fit-content; max-width: 100%; margin-bottom: 12px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: #ece8df; }
+.users-tab { border: 0; border-radius: 7px; background: transparent; color: var(--muted); padding: 10px 16px; font-size: 12px; font-weight: 700; }
+.users-tab.active { background: white; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.users-tab span { display: inline-grid; min-width: 20px; height: 20px; margin-left: 5px; place-items: center; border-radius: 50%; background: #eee6d1; color: #7f641b; font-size: 10px; }
+.users-tab-panel[hidden] { display: none; }
 .empty { padding: 30px; color: var(--muted); text-align: center; }
 .toast { position: fixed; z-index: 20; right: 22px; bottom: 22px; max-width: 390px; border-radius: 9px; background: var(--navy); color: white; padding: 13px 17px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: .2s; font-size: 12px; }
 .toast.show { opacity: 1; transform: none; }
@@ -145,5 +151,7 @@ dialog::backdrop { background: rgba(0,0,0,.65); backdrop-filter: blur(3px); }
   .editor, .profile-grid { grid-template-columns: 1fr; }
   .field.full, .form-actions { grid-column: 1; }
   .card-head { align-items: flex-start; flex-direction: column; }
+  .users-tabs { width: 100%; }
+  .users-tab { flex: 1; padding-inline: 8px; }
   .login-card { padding: 28px 24px; }
 }
