@@ -3,14 +3,16 @@ const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em','cliente_id','pedido_id'];
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
 const SUPPLIER_COLUMNS_ = ['id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','orders','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const MENU_CONFIG_COLUMNS_ = ['id','menu_titulo','secao_titulo','secao_subtitulo','ativo','atualizado_em'];
+const MENU_CARD_COLUMNS_ = ['id','titulo','descricao','fotos_json','ordem','ativo','criado_em','atualizado_em'];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','site_menu','orders','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -24,7 +26,7 @@ function doPost(event) {
 }
 
 function dispatch_(request) {
-  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout'];
+  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout','getSiteMenuData','submitBudgetRequest'];
   const actor = publicActions.includes(request.action) ? null : auth_(request.token);
   switch (request.action) {
     case 'placeOrder': return placeOrder_(request);
@@ -32,6 +34,12 @@ function dispatch_(request) {
     case 'verifyCustomerCode': return verifyCustomerCode_(request);
     case 'customerOrders': return customerOrders_(request);
     case 'customerLogout': return customerLogout_(request);
+    case 'getSiteMenuData': return getSiteMenuData_();
+    case 'submitBudgetRequest': return submitBudgetRequest_(request);
+    case 'getSiteMenuAdmin': module_(actor, 'site_menu'); return getSiteMenuAdmin_();
+    case 'saveSiteMenuConfig': return saveSiteMenuConfig_(actor, request.record || {});
+    case 'saveSiteCard': return saveSiteCard_(actor, request.record || {}, request.operation || 'create');
+    case 'deleteSiteCard': return deleteSiteCard_(actor, request.id);
     case 'listOrders': return listOrders_(actor);
     case 'retryOrder': module_(actor, 'orders'); return withLock_(() => { const rows=readOrders_(); const order=rows.find(row=>row.id===String(request.id || '')); if (!order) throw Error('Pedido não encontrado.'); if (order.status === 'excluindo') throw Error('Este pedido está com exclusão pendente. Tente excluí-lo novamente.'); if (order.status !== 'recebido') finishOrder_(order,rows); return {saved:true}; });
     case 'deleteOrder': return deleteOrder_(actor, request.id);
@@ -126,15 +134,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,orders:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,site_menu:true,orders:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -157,11 +165,11 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
@@ -329,6 +337,328 @@ function deleteSupplier_(actor, id, version) {
     if (String(version || '') !== selected.atualizado_em) throw Error('Fornecedor atualizado por outra sessão. Atualize a lista antes de excluir.');
     saveSupplierRows_(rows.filter(row => row.id !== selected.id));
     return {deleted:true};
+  });
+}
+
+function getMenuConfigFile_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('MENU_CONFIG_FILE_ID');
+  if (id) {
+    try {
+      return DriveApp.getFileById(id);
+    } catch (_) {}
+  }
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const files = folder.getFilesByName('menu_site_config.csv');
+  const file = files.hasNext() ? files.next() : folder.createFile('menu_site_config.csv', csv_(MENU_CONFIG_COLUMNS_, [{
+    id: 'default',
+    menu_titulo: 'Eventos',
+    secao_titulo: 'Eventos & Celebrações',
+    secao_subtitulo: 'Experiências gastronômicas exclusivas para momentos memoráveis',
+    ativo: '1',
+    atualizado_em: now_()
+  }]), 'text/csv');
+  props.setProperty('MENU_CONFIG_FILE_ID', file.getId());
+  return file;
+}
+
+function readSiteMenuConfig_() {
+  const file = getMenuConfigFile_();
+  const text = file.getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (MENU_CONFIG_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de menu_site_config.csv inválido.');
+  const row = matrix.find(r => r.some(Boolean));
+  if (!row) {
+    return {
+      id: 'default',
+      menu_titulo: 'Eventos',
+      secao_titulo: 'Eventos & Celebrações',
+      secao_subtitulo: 'Experiências gastronômicas exclusivas para momentos memoráveis',
+      ativo: '1',
+      atualizado_em: now_()
+    };
+  }
+  return Object.fromEntries(headers.map((k, i) => [k, row[i] || '']));
+}
+
+function saveSiteMenuConfig_(actor, input) {
+  module_(actor, 'site_menu');
+  const menu_titulo = String(input.menu_titulo || '').trim() || 'Opção';
+  const secao_titulo = String(input.secao_titulo || '').trim() || menu_titulo;
+  const secao_subtitulo = String(input.secao_subtitulo || '').trim();
+  const ativo = input.ativo === false || input.ativo === '0' ? '0' : '1';
+  if (menu_titulo.length < 2 || menu_titulo.length > 50) throw Error('O título do menu deve conter de 2 a 50 caracteres.');
+  if (secao_titulo.length < 2 || secao_titulo.length > 100) throw Error('O título da seção deve conter de 2 a 100 caracteres.');
+  if (secao_subtitulo.length > 300) throw Error('O subtítulo da seção deve conter até 300 caracteres.');
+
+  return withLock_(() => {
+    const file = getMenuConfigFile_();
+    const config = {
+      id: 'default',
+      menu_titulo,
+      secao_titulo,
+      secao_subtitulo,
+      ativo,
+      atualizado_em: now_()
+    };
+    file.setContent(csv_(MENU_CONFIG_COLUMNS_, [config]));
+    return config;
+  });
+}
+
+function getMenuCardsFile_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('MENU_CARDS_FILE_ID');
+  if (id) {
+    try {
+      return DriveApp.getFileById(id);
+    } catch (_) {}
+  }
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const files = folder.getFilesByName('menu_site_cards.csv');
+  const file = files.hasNext() ? files.next() : folder.createFile('menu_site_cards.csv', csv_(MENU_CARD_COLUMNS_, []), 'text/csv');
+  props.setProperty('MENU_CARDS_FILE_ID', file.getId());
+  return file;
+}
+
+function readSiteCards_() {
+  const file = getMenuCardsFile_();
+  const text = file.getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  if (!text.trim()) return [];
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (MENU_CARD_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de menu_site_cards.csv inválido.');
+  return matrix.filter(r => r.some(Boolean)).map(r => Object.fromEntries(headers.map((k, i) => [k, r[i] || ''])));
+}
+
+function saveSiteCards_(rows) {
+  const file = getMenuCardsFile_();
+  file.setContent(csv_(MENU_CARD_COLUMNS_, rows));
+}
+
+function getMenuPhotosFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('MENU_PHOTOS_FOLDER_ID');
+  if (id) {
+    try {
+      return DriveApp.getFolderById(id);
+    } catch (_) {}
+  }
+  const root = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const folders = root.getFoldersByName('fotos-menu-site');
+  const folder = folders.hasNext() ? folders.next() : root.createFolder('fotos-menu-site');
+  try { folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) {}
+  props.setProperty('MENU_PHOTOS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function saveSiteCard_(actor, input, operation) {
+  module_(actor, 'site_menu');
+  const id = String(input.id || '');
+  const titulo = String(input.titulo || '').trim();
+  const descricao = String(input.descricao || '').trim();
+  const ordem = String(input.ordem || '1').trim();
+  const ativo = input.ativo === false || input.ativo === '0' ? '0' : '1';
+  const incomingPhotos = Array.isArray(input.fotos) ? input.fotos.slice(0, 3) : [];
+
+  if (titulo.length < 2 || titulo.length > 120) throw Error('O título do card deve conter de 2 a 120 caracteres.');
+  if (descricao.length < 2 || descricao.length > 4000) throw Error('A descrição do card deve conter de 2 a 4.000 caracteres.');
+
+  return withLock_(() => {
+    const rows = readSiteCards_();
+    const index = operation === 'update' ? rows.findIndex(r => r.id === id) : -1;
+    const old = rows[index];
+    if (operation === 'update' && !old) throw Error('Card não encontrado.');
+
+    let oldPhotoIds = [];
+    if (old) {
+      try { oldPhotoIds = JSON.parse(old.fotos_json || '[]'); } catch (_) {}
+    }
+
+    const folder = getMenuPhotosFolder_();
+    const finalPhotoIds = [];
+
+    incomingPhotos.forEach(p => {
+      const photoStr = String(p || '').trim();
+      if (!photoStr) return;
+      if (photoStr.startsWith('data:image/')) {
+        const decoded = decodePhoto_(photoStr);
+        const file = folder.createFile(Utilities.newBlob(decoded.bytes, decoded.mime, 'card-' + Utilities.getUuid() + '.' + decoded.extension));
+        try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) {}
+        finalPhotoIds.push(file.getId());
+      } else if (/^[A-Za-z0-9_-]{20,}$/.test(photoStr)) {
+        finalPhotoIds.push(photoStr);
+      }
+    });
+
+    const removedIds = oldPhotoIds.filter(pid => !finalPhotoIds.includes(pid));
+    removedIds.forEach(pid => {
+      try { DriveApp.getFileById(pid).setTrashed(true); } catch (_) {}
+    });
+
+    const stamp = now_();
+    const record = {
+      id: old ? old.id : Utilities.getUuid(),
+      titulo,
+      descricao,
+      fotos_json: JSON.stringify(finalPhotoIds),
+      ordem: /^\d+$/.test(ordem) ? ordem : '1',
+      ativo,
+      criado_em: old ? old.criado_em : stamp,
+      atualizado_em: stamp
+    };
+
+    if (old) rows[index] = record; else rows.push(record);
+    saveSiteCards_(rows);
+    return record;
+  });
+}
+
+function deleteSiteCard_(actor, id) {
+  module_(actor, 'site_menu');
+  return withLock_(() => {
+    const rows = readSiteCards_();
+    const selected = rows.find(r => r.id === String(id || ''));
+    if (!selected) throw Error('Card não encontrado.');
+
+    let photoIds = [];
+    try { photoIds = JSON.parse(selected.fotos_json || '[]'); } catch (_) {}
+    photoIds.forEach(pid => {
+      try { DriveApp.getFileById(pid).setTrashed(true); } catch (_) {}
+    });
+
+    saveSiteCards_(rows.filter(r => r.id !== selected.id));
+    return {deleted: true};
+  });
+}
+
+function getSiteMenuData_() {
+  const config = readSiteMenuConfig_();
+  const cards = readSiteCards_().filter(c => c.ativo !== '0').sort((a,b) => Number(a.ordem || 0) - Number(b.ordem || 0)).map(c => {
+    let photoIds = [];
+    try { photoIds = JSON.parse(c.fotos_json || '[]'); } catch (_) {}
+    const photos = photoIds.map(id => ({
+      id,
+      url: 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1200'
+    }));
+    return {
+      id: c.id,
+      titulo: c.titulo,
+      descricao: c.descricao,
+      photos,
+      ordem: Number(c.ordem || 0)
+    };
+  });
+  return {
+    config: {
+      menu_titulo: config.menu_titulo || 'Opção',
+      secao_titulo: config.secao_titulo || 'Opção',
+      secao_subtitulo: config.secao_subtitulo || '',
+      ativo: config.ativo !== '0'
+    },
+    cards
+  };
+}
+
+function getSiteMenuAdmin_() {
+  const config = readSiteMenuConfig_();
+  const cards = readSiteCards_().sort((a,b) => Number(a.ordem || 0) - Number(b.ordem || 0)).map(c => {
+    let photoIds = [];
+    try { photoIds = JSON.parse(c.fotos_json || '[]'); } catch (_) {}
+    const photos = photoIds.map(id => ({
+      id,
+      url: 'https://drive.google.com/thumbnail?id=' + id + '&sz=w800'
+    }));
+    return {
+      ...c,
+      photos
+    };
+  });
+  return {config, cards};
+}
+
+function submitBudgetRequest_(request) {
+  const input = request.record || {};
+  const cardTitulo = String(input.card_titulo || 'Opção').trim();
+  const nome = String(input.nome || '').trim();
+  const email = normalizeEmail_(input.email);
+  const rawWhatsapp = String(input.whatsapp || '').trim();
+  const whatsapp = rawWhatsapp.replace(/\D/g, '');
+  const cidade = String(input.cidade || '').trim();
+  const dataEvento = String(input.data_evento || '').trim();
+  const convidados = String(input.convidados || '').trim();
+  const observacoes = String(input.observacoes || '').trim();
+
+  if (nome.length < 2 || nome.length > 180) throw Error('Informe seu nome completo.');
+  if (!validEmail_(email)) throw Error('Informe um e-mail válido.');
+  if (!/^[+\d() .-]+$/.test(rawWhatsapp) || !/^\d{10,15}$/.test(whatsapp)) throw Error('Informe um WhatsApp válido com DDD.');
+
+  return withLock_(() => {
+    const clients = readClients_();
+    let client = clients.find(c => normalizeEmail_(c.email) === email || phoneKey_(c.whatsapp) === phoneKey_(whatsapp));
+    const stamp = now_();
+    if (!client) {
+      client = {
+        id: Utilities.getUuid(),
+        nome,
+        email,
+        whatsapp,
+        data_cadastro: brazilDate_(),
+        criado_em: stamp,
+        atualizado_em: stamp
+      };
+      clients.push(client);
+      saveClientRows_(clients);
+    }
+
+    const subject = 'SOLO Ateliê — Solicitação de Orçamento: ' + cardTitulo;
+    let body = 'Olá, equipe SOLO!\n\nUma nova solicitação de orçamento foi realizada pelo site:\n\n';
+    body += '• Item / Interesse: ' + cardTitulo + '\n';
+    body += '• Cliente: ' + nome + '\n';
+    body += '• E-mail: ' + email + '\n';
+    body += '• WhatsApp: ' + whatsapp + '\n';
+    if (cidade) body += '• Local / Cidade: ' + cidade + '\n';
+    if (dataEvento) body += '• Data prevista: ' + dataEvento + '\n';
+    if (convidados) body += '• Número de convidados: ' + convidados + '\n';
+    if (observacoes) body += '• Mensagem / Observações:\n' + observacoes + '\n';
+    body += '\nData da solicitação: ' + stamp + '\n';
+
+    const adminEmail = PropertiesService.getScriptProperties().getProperty('INITIAL_ADMIN_EMAIL') || 'eduperalles@gmail.com';
+    try {
+      if (MailApp.getRemainingDailyQuota() > 0) {
+        MailApp.sendEmail({
+          to: adminEmail,
+          replyTo: email,
+          subject,
+          body,
+          name: 'SOLO Ateliê — Orçamentos'
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao enviar e-mail de orçamento:', err);
+    }
+
+    let waMsg = '*SOLO ATELIÊ - SOLICITAÇÃO DE ORÇAMENTO*\n';
+    waMsg += '*INTERESSE:* ' + cardTitulo + '\n';
+    waMsg += '-----------------------------------\n';
+    waMsg += '*CLIENTE:* ' + nome + '\n';
+    waMsg += '*E-MAIL:* ' + email + '\n';
+    waMsg += '*TELEFONE:* ' + whatsapp + '\n';
+    if (cidade) waMsg += '*CIDADE/LOCAL:* ' + cidade + '\n';
+    if (dataEvento) waMsg += '*DATA PREVISTA:* ' + dataEvento + '\n';
+    if (convidados) waMsg += '*CONVIDADOS:* ' + convidados + '\n';
+    if (observacoes) waMsg += '*OBSERVAÇÕES:* ' + observacoes + '\n';
+    waMsg += '-----------------------------------\n';
+    waMsg += '_Enviado pelo formulário do site SOLO Ateliê._';
+
+    const waUrl = 'https://wa.me/5519993835111?text=' + encodeURIComponent(waMsg);
+
+    return {
+      ok: true,
+      message: 'Solicitação de orçamento enviada com sucesso! Você também pode continuar o atendimento pelo WhatsApp.',
+      whatsapp_url: waUrl
+    };
   });
 }
 

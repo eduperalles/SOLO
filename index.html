@@ -374,10 +374,153 @@
         }
         .access-counter i { color: var(--accent-gold); }
         .access-counter span { color: white; font-weight: 700; }
+
+        /* --- SEÇÃO DINÂMICA (MENU SITE) --- */
+        .custom-menu-section {
+            background-color: var(--bg-light);
+            padding: 5rem 1rem;
+        }
+        .custom-cards-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 2.5rem auto 0;
+            padding: 0 1rem;
+        }
+        @media (min-width: 650px) { .custom-cards-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (min-width: 1000px) { .custom-cards-grid { grid-template-columns: repeat(3, 1fr); } }
+        .dynamic-card {
+            background: white;
+            border: 1px solid #e5e0d6;
+            border-radius: 6px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.04);
+            transition: var(--transition);
+        }
+        .dynamic-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            border-color: var(--accent-gold);
+        }
+        .dynamic-card-media {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/11;
+            background: #151515;
+            overflow: hidden;
+        }
+        .dynamic-card-media img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform .3s ease;
+        }
+        .dynamic-card:hover .dynamic-card-media img {
+            transform: scale(1.03);
+        }
+        .dynamic-card-dots {
+            position: absolute;
+            bottom: 8px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            z-index: 2;
+        }
+        .dynamic-card-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.5);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .dynamic-card-dot.active {
+            background: var(--accent-gold);
+            transform: scale(1.2);
+        }
+        .dynamic-card-nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0,0,0,0.45);
+            color: white;
+            border: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 2;
+            font-size: 11px;
+            transition: background .2s;
+        }
+        .dynamic-card-nav-btn:hover {
+            background: var(--accent-gold);
+        }
+        .dynamic-card-nav-btn.prev { left: 8px; }
+        .dynamic-card-nav-btn.next { right: 8px; }
+        .dynamic-card-body {
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+        .dynamic-card-body h3 {
+            font-size: 1.4rem;
+            color: var(--primary);
+            margin-bottom: 0.6rem;
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            font-weight: 700;
+        }
+        .dynamic-card-body p {
+            color: var(--text-gray);
+            font-size: 0.88rem;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+            flex: 1;
+            white-space: pre-wrap;
+        }
+        .btn-budget {
+            width: 100%;
+            text-align: center;
+            background: var(--primary);
+            color: white;
+            padding: 0.8rem 1.2rem;
+            border: 1px solid var(--primary);
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .btn-budget:hover {
+            background: var(--accent-gold);
+            border-color: var(--accent-gold);
+            color: white;
+        }
+        .budget-modal-content {
+            background: white;
+            width: 100%;
+            max-width: 580px;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            position: relative;
+        }
     </style>
   <link rel="stylesheet" href="assets/checkout.css?v=20261119-orders2">
   <script src="assets/config.js"></script>
   <script src="assets/checkout.js?v=20261119-orders" defer></script>
+  <script src="assets/site-menu.js?v=20261119-menu-site" defer></script>
 </head>
 <body>
 <div class="print-warning" style="display: none;">
@@ -402,6 +545,7 @@
                 <li><a href="#custom-area" class="highlight-menu">Monte o Seu</a></li>
                 <li><a href="#bistro">Bistrô</a></li>
                 <li><a href="#estacao">Estação</a></li>
+                <li id="nav-item-custom" style="display:none;"><a href="#custom-section" id="nav-link-custom">Opção</a></li>
                 <li><a href="#contact">Contato</a></li>
             </ul>
 
@@ -424,6 +568,7 @@
                 <li><a href="#custom-area" onClick="toggleMobileMenu()">Monte o Seu</a></li>
                 <li><a href="#bistro" onClick="toggleMobileMenu()">Bistrô</a></li>
                 <li><a href="#estacao" onClick="toggleMobileMenu()">Estação</a></li>
+                <li id="mobile-nav-item-custom" style="display:none;"><a href="#custom-section" id="mobile-nav-link-custom" onClick="toggleMobileMenu()">Opção</a></li>
                 <li><a href="#contact" onClick="toggleMobileMenu()">Contato</a></li>
                 <li><a href="login.html" onClick="toggleMobileMenu()">Área do painel</a></li>
             </ul>
@@ -518,11 +663,88 @@
         </div>
     </section>
 
+    <!-- SEÇÃO DINÂMICA (MENU SITE) -->
+    <section id="custom-section" class="custom-menu-section" style="display:none;">
+        <div class="container">
+            <div class="section-title">
+                <h2 id="custom-section-title">Opção</h2>
+                <p id="custom-section-subtitle">Experiências exclusivas e sob medida</p>
+            </div>
+            <div class="custom-cards-grid" id="custom-cards-container">
+                <!-- Cards renderizados dinamicamente via JS da API -->
+            </div>
+        </div>
+    </section>
+
     <div class="modal" id="categoryModal">
         <div class="category-modal-content">
             <div class="cat-modal-header">
                 <h3 id="catModalTitle">Categoria</h3>
                 <p style="color: var(--accent-gold); font-weight: 700; font-size: 0.9rem; margin-top: 5px;">Pedidos de no mínimo 48hs de antecedência.</p>
+                <button class="custom-close-btn" onClick="closeCategoryModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="cat-modal-body" id="catModalItems">
+                </div>
+        </div>
+    </div>
+
+    <!-- MODAL SOLICITE UM ORÇAMENTO -->
+    <div class="modal" id="budgetModal" style="display: none;">
+        <div class="category-modal-content budget-modal-content">
+            <div class="cat-modal-header">
+                <p class="eyebrow" style="color: var(--accent-gold); margin-bottom: 5px;">SOLO Ateliê Artesanal</p>
+                <h3 id="budgetModalTitle">Solicite um Orçamento</h3>
+                <p style="font-size: 0.85rem; color: #777; margin: 4px 0 0;">Preencha os dados abaixo e entraremos em contato imediatamente.</p>
+                <button class="custom-close-btn" type="button" onClick="closeBudgetModal()" aria-label="Fechar">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="cat-modal-body" style="padding: 1.5rem;">
+                <form id="budgetForm" onSubmit="handleBudgetSubmit(event)">
+                    <input type="hidden" id="budgetCardId" name="card_id">
+                    <input type="hidden" id="budgetCardTitle" name="card_titulo">
+                    <div style="display: grid; gap: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">Nome Completo *</label>
+                            <input id="budgetNome" name="nome" type="text" required maxlength="180" placeholder="Seu nome completo" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                            <div>
+                                <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">E-mail *</label>
+                                <input id="budgetEmail" name="email" type="email" required maxlength="254" placeholder="seu@email.com" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">WhatsApp com DDD *</label>
+                                <input id="budgetWhatsapp" name="whatsapp" type="tel" required maxlength="20" placeholder="(19) 99999-9999" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                            <div>
+                                <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">Cidade / Local</label>
+                                <input id="budgetCidade" name="cidade" type="text" maxlength="100" placeholder="Ex: Campinas" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">Data Prevista</label>
+                                <input id="budgetData" name="data_evento" type="date" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">Nº de Convidados</label>
+                                <input id="budgetConvidados" name="convidados" type="text" maxlength="30" placeholder="Ex: 50 pessoas" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; color: var(--primary);">Detalhes / Observações</label>
+                            <textarea id="budgetObs" name="observacoes" rows="3" maxlength="2000" placeholder="Conte-nos um pouco sobre a sua ideia, preferências ou dúvidas..." style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit;"></textarea>
+                        </div>
+                        <p id="budgetStatusMsg" style="min-height: 18px; margin: 0; font-size: 0.85rem;"></p>
+                        <button id="budgetSubmitBtn" type="submit" class="btn" style="width: 100%; margin-top: 6px;">Enviar Solicitação</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
                 <button class="custom-close-btn" onClick="closeCategoryModal()">
                     <i class="fas fa-times"></i>
                 </button>

@@ -7,16 +7,21 @@
   let users = [];
   let clients = [];
   let suppliers = [];
+  let siteMenuConfig = { menu_titulo: 'Eventos', secao_titulo: 'Eventos & Celebrações', secao_subtitulo: '', ativo: '1' };
+  let siteCards = [];
   let clientsTab = 'editor';
   let suppliersTab = 'editor';
+  let siteMenuTab = 'config';
   let editingClientId = '';
   let editingSupplierId = '';
+  let editingCardId = '';
+  let cardPhotos = [];
   let selectedAccess = null;
   let settingsTab = 'access';
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
-    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers');
+    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('site_menu');
   }
   let activePage = 'dashboard';
   let editingId = '';
@@ -68,6 +73,10 @@
       createClient:'Salvando cliente',
       updateClient:'Salvando cliente',
       deleteClient:'Excluindo cliente',
+      getSiteMenuAdmin:'Carregando Menu Site',
+      saveSiteMenuConfig:'Salvando configurações do menu',
+      saveSiteCard:'Salvando card',
+      deleteSiteCard:'Excluindo card',
       createSupplier:'Salvando fornecedor',
       updateSupplier:'Salvando fornecedor',
       deleteSupplier:'Excluindo fornecedor',
@@ -137,18 +146,19 @@
       return;
     }
     activePage = page;
-    if (['users','clients','suppliers'].includes(page)) {
+    if (['users','clients','suppliers','site_menu'].includes(page)) {
       document.querySelector('#registrations-items').hidden = false;
       document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
     }
-    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers'].includes(page));
+    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','site_menu'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') void loadDashboardPage();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
     else if (page === 'suppliers') void loadSuppliersPage();
+    else if (page === 'site_menu') void loadSiteMenuPage();
     else if (page === 'orders') void loadOrdersPage();
     else if (page === 'finance') void loadFinancePage();
     else if (page === 'settings') void loadSettingsPage();
@@ -469,6 +479,24 @@
                 <td><code>SUPPLIERS_FILE_ID</code></td>
               </tr>
               <tr>
+                <td><b>menu_site_config.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Configurações do item de menu e seção dinâmica do site (título do menu, título da seção, subtítulo e status ativo).</td>
+                <td><code>MENU_CONFIG_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>menu_site_cards.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Cards dinâmicos com título, descrição, galeria de fotos e ordem para apresentação no site.</td>
+                <td><code>MENU_CARDS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>fotos-menu-site</b></td>
+                <td><span class="badge">Pasta</span></td>
+                <td>Pasta pública no Google Drive para armazenamento das fotos (até 3 por card) dos cards dinâmicos do site.</td>
+                <td><code>MENU_PHOTOS_FOLDER_ID</code></td>
+              </tr>
+              <tr>
                 <td><b>pedidos.csv</b></td>
                 <td><span class="badge">CSV</span></td>
                 <td>Pedidos realizados pelo catálogo do site e portal do cliente, com itens JSON, valor total, entrega, chave de idempotência e hash.</td>
@@ -623,7 +651,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','clients','suppliers','orders','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','suppliers','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -852,6 +880,289 @@
         if (activePage === 'suppliers') renderSuppliers();
         toast('Fornecedor excluído.');
       } catch (error) { button.disabled = false; toast(error.message,true); }
+    }));
+  }
+
+  async function loadSiteMenuPage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando Menu Site…</div>';
+    try {
+      const data = await api('getSiteMenuAdmin');
+      if (activePage !== 'site_menu') return;
+      siteMenuConfig = data.config || siteMenuConfig;
+      siteCards = data.cards || [];
+      renderSiteMenu();
+    } catch (error) {
+      if (activePage === 'site_menu') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function siteCardRows(filter = '') {
+    const query = filter.trim().toLocaleLowerCase('pt-BR');
+    const visible = siteCards.filter(c => `${c.titulo} ${c.descricao}`.toLocaleLowerCase('pt-BR').includes(query));
+    if (!visible.length) return '<div class="empty">Nenhum card cadastrado.</div>';
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Ordem</th><th>Fotos</th><th>Título</th><th>Descrição</th><th>Status</th><th>Ações</th></tr></thead><tbody>${visible.map(c => {
+      const photos = c.photos || [];
+      const thumbs = photos.length ? photos.map(p => `<img src="${escapeHtml(p.url)}" alt="" class="table-card-thumb" onerror="this.style.display='none'">`).join('') : '<span class="helper">Sem fotos</span>';
+      return `<tr>
+        <td><b>#${escapeHtml(c.ordem || '1')}</b></td>
+        <td><div class="table-card-thumbs">${thumbs}</div></td>
+        <td><b>${escapeHtml(c.titulo)}</b></td>
+        <td><span class="table-subtext" style="max-width:280px;white-space:normal;">${escapeHtml(c.descricao.length > 90 ? c.descricao.slice(0,87) + '…' : c.descricao)}</span></td>
+        <td><span class="badge ${c.ativo !== '0' ? '' : 'inactive'}">${c.ativo !== '0' ? 'Ativo' : 'Inativo'}</span></td>
+        <td><div class="row-actions"><button class="tiny-button" type="button" data-site-card-edit="${escapeHtml(c.id)}">Editar</button><button class="tiny-button danger" type="button" data-site-card-delete="${escapeHtml(c.id)}">Excluir</button></div></td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+
+  function readAndResizeImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 1200;
+          const maxH = 800;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxW || h > maxH) {
+            if (w / h > maxW / maxH) {
+              h = Math.round(h * maxW / w);
+              w = maxW;
+            } else {
+              w = Math.round(w * maxH / h);
+              h = maxH;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderCardPhotoThumbs() {
+    const list = document.querySelector('#card-photos-list');
+    const addBtn = document.querySelector('#btn-add-card-photo');
+    if (!list) return;
+    list.innerHTML = cardPhotos.map((p, idx) => {
+      const src = p.startsWith('data:') ? p : `https://drive.google.com/thumbnail?id=${p}&sz=w400`;
+      return `<div class="card-photo-item">
+        <img src="${escapeHtml(src)}" alt="Foto ${idx + 1}" onerror="this.style.display='none'">
+        <button type="button" class="card-photo-remove" data-remove-photo="${idx}" title="Remover foto" aria-label="Remover foto">&times;</button>
+      </div>`;
+    }).join('');
+    if (addBtn) {
+      addBtn.disabled = cardPhotos.length >= 3;
+      addBtn.textContent = `+ Adicionar foto (${cardPhotos.length}/3)`;
+    }
+    list.querySelectorAll('[data-remove-photo]').forEach(btn => btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.removePhoto);
+      cardPhotos.splice(idx, 1);
+      renderCardPhotoThumbs();
+    }));
+  }
+
+  function renderSiteMenu() {
+    const currentCard = siteCards.find(c => c.id === editingCardId);
+    if (editingCardId && currentCard && !cardPhotos.length && currentCard.photos) {
+      cardPhotos = (currentCard.photos || []).map(p => p.id);
+    }
+    workspace.innerHTML = `<div class="users-tabs" role="tablist" aria-label="Menu do Site">
+      <button class="users-tab ${siteMenuTab === 'config' ? 'active' : ''}" type="button" role="tab" data-site-menu-tab="config" aria-selected="${siteMenuTab === 'config'}">Configuração da Seção</button>
+      <button class="users-tab ${siteMenuTab === 'card_editor' ? 'active' : ''}" type="button" role="tab" data-site-menu-tab="card_editor" aria-selected="${siteMenuTab === 'card_editor'}">${currentCard ? 'Editar Card' : 'Novo Card'}</button>
+      <button class="users-tab ${siteMenuTab === 'card_list' ? 'active' : ''}" type="button" role="tab" data-site-menu-tab="card_list" aria-selected="${siteMenuTab === 'card_list'}">Cards Cadastrados <span>${siteCards.length}</span></button>
+    </div>
+
+    <section class="content-card users-tab-panel" data-site-menu-panel="config" ${siteMenuTab === 'config' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>Configuração da Seção no Site</h2><p>Defina o nome do item no menu principal e os títulos da seção correspondente.</p></div></div>
+      <form id="site-menu-config-form" class="editor" style="padding: 10px 0;">
+        <div class="field"><label for="menu-titulo">Título no Menu Principal</label><input id="menu-titulo" name="menu_titulo" maxlength="50" minlength="2" value="${escapeHtml(siteMenuConfig.menu_titulo || 'Opção')}" placeholder="Ex: Eventos, Opção, etc." required><small class="helper">Aparece na barra de navegação do site entre Estação e Contato.</small></div>
+        <div class="field"><label for="secao-titulo">Título da Seção na Página</label><input id="secao-titulo" name="secao_titulo" maxlength="100" minlength="2" value="${escapeHtml(siteMenuConfig.secao_titulo || 'Eventos & Celebrações')}" placeholder="Ex: Eventos Especiais" required><small class="helper">Título principal em destaque na seção do site.</small></div>
+        <div class="field full"><label for="secao-subtitulo">Subtítulo / Descrição da Seção</label><input id="secao-subtitulo" name="secao_subtitulo" maxlength="300" value="${escapeHtml(siteMenuConfig.secao_subtitulo || '')}" placeholder="Ex: Experiências gastronômicas exclusivas para momentos memoráveis"><small class="helper">Frase descritiva abaixo do título da seção.</small></div>
+        <div class="field full"><label class="access-module" style="margin:0;cursor:pointer;"><input type="checkbox" name="ativo" ${siteMenuConfig.ativo !== '0' ? 'checked' : ''}><span><b>Seção Ativa no Site</b><small>Quando ativada, a opção aparece no menu e a seção com os cards é exibida aos visitantes.</small></span></label></div>
+        <div class="form-actions"><button class="button" type="submit">Salvar Configurações</button></div>
+      </form>
+    </section>
+
+    <section class="content-card users-tab-panel" data-site-menu-panel="card_editor" ${siteMenuTab === 'card_editor' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>${currentCard ? 'Editar Card' : 'Cadastrar Card'}</h2><p>Preencha os detalhes e fotos do card que será exibido nesta seção do site.</p></div></div>
+      <form id="site-card-form" class="editor" style="padding: 10px 0;">
+        <input type="hidden" name="id" value="${escapeHtml(currentCard?.id || '')}">
+        <div class="field full"><label for="card-titulo">Título do Card</label><input id="card-titulo" name="titulo" maxlength="120" minlength="2" value="${escapeHtml(currentCard?.titulo || '')}" placeholder="Ex: Festa corporativa, Casamento, Aniversário" required></div>
+        <div class="field full"><label for="card-descricao">Descrição do Card</label><textarea id="card-descricao" name="descricao" rows="4" maxlength="4000" placeholder="Explique o que a SOLO oferece nesta experiência..." required>${escapeHtml(currentCard?.descricao || '')}</textarea><small class="helper">Texto descritivo exibido no corpo do card.</small></div>
+        <div class="field"><label for="card-ordem">Ordem de exibição</label><input id="card-ordem" name="ordem" type="number" min="1" max="99" value="${escapeHtml(currentCard?.ordem || '1')}" required></div>
+        <div class="field"><label class="access-module" style="margin-top:28px;cursor:pointer;"><input type="checkbox" name="ativo" ${currentCard?.ativo !== '0' ? 'checked' : ''}><span><b>Card Ativo</b><small>Visível no site para orçamentos.</small></span></label></div>
+
+        <div class="field full" style="margin-top:14px;">
+          <label>Fotos do Card (Até 3 fotos)</label>
+          <div class="card-photos-container">
+            <div id="card-photos-list" class="card-photos-list"></div>
+            <button type="button" class="button button-secondary" id="btn-add-card-photo" ${cardPhotos.length >= 3 ? 'disabled' : ''}>+ Adicionar foto (${cardPhotos.length}/3)</button>
+            <input type="file" id="card-photo-file-input" accept="image/jpeg,image/png" style="display:none">
+          </div>
+          <small class="helper">As fotos são salvas na pasta "fotos-menu-site" do Google Drive e exibidas em carrossel no card.</small>
+        </div>
+
+        <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar Card</button></div>
+      </form>
+    </section>
+
+    <section class="content-card users-tab-panel" data-site-menu-panel="card_list" ${siteMenuTab === 'card_list' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>Cards Cadastrados</h2><p>${siteCards.length} cards disponíveis</p></div><div class="toolbar"><input id="cards-search" aria-label="Buscar cards" placeholder="Buscar cards…"></div></div>
+      <div id="cards-table">${siteCardRows()}</div>
+    </section>`;
+
+    bindSiteMenuActions();
+    renderCardPhotoThumbs();
+  }
+
+  function bindSiteMenuActions() {
+    workspace.querySelectorAll('[data-site-menu-tab]').forEach(btn => btn.addEventListener('click', () => {
+      siteMenuTab = btn.dataset.siteMenuTab;
+      workspace.querySelectorAll('[data-site-menu-tab]').forEach(tab => {
+        const active = tab.dataset.siteMenuTab === siteMenuTab;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      workspace.querySelectorAll('[data-site-menu-panel]').forEach(panel => {
+        panel.hidden = panel.dataset.siteMenuPanel !== siteMenuTab;
+      });
+    }));
+
+    const configForm = document.querySelector('#site-menu-config-form');
+    if (configForm) {
+      configForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const btn = configForm.querySelector('[type="submit"]');
+        btn.disabled = true;
+        const formData = new FormData(configForm);
+        const record = {
+          menu_titulo: formData.get('menu_titulo'),
+          secao_titulo: formData.get('secao_titulo'),
+          secao_subtitulo: formData.get('secao_subtitulo'),
+          ativo: formData.get('ativo') === 'on'
+        };
+        try {
+          const saved = await api('saveSiteMenuConfig', {record});
+          siteMenuConfig = saved;
+          toast('Configurações do menu salvas com sucesso.');
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+
+    const cardForm = document.querySelector('#site-card-form');
+    const photoFileInput = document.querySelector('#card-photo-file-input');
+    const addPhotoBtn = document.querySelector('#btn-add-card-photo');
+
+    if (addPhotoBtn && photoFileInput) {
+      addPhotoBtn.addEventListener('click', () => photoFileInput.click());
+      photoFileInput.addEventListener('change', async event => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        photoFileInput.value = '';
+        if (cardPhotos.length >= 3) {
+          toast('Limite de 3 fotos atingido.', true);
+          return;
+        }
+        try {
+          const dataUrl = await readAndResizeImage(file);
+          cardPhotos.push(dataUrl);
+          renderCardPhotoThumbs();
+        } catch (err) {
+          toast('Falha ao processar imagem: ' + err.message, true);
+        }
+      });
+    }
+
+    if (cardForm) {
+      cardForm.addEventListener('reset', event => {
+        event.preventDefault();
+        editingCardId = '';
+        cardPhotos = [];
+        renderSiteMenu();
+      });
+      cardForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!cardForm.reportValidity()) return;
+        const btn = cardForm.querySelector('[type="submit"]');
+        btn.disabled = true;
+        const formData = new FormData(cardForm);
+        const record = {
+          id: formData.get('id') || '',
+          titulo: formData.get('titulo'),
+          descricao: formData.get('descricao'),
+          ordem: formData.get('ordem'),
+          ativo: formData.get('ativo') === 'on',
+          fotos: cardPhotos
+        };
+        try {
+          const saved = await api('saveSiteCard', {record, operation: record.id ? 'update' : 'create'});
+          const idx = siteCards.findIndex(c => c.id === saved.id);
+          if (idx >= 0) siteCards[idx] = saved; else siteCards.push(saved);
+          editingCardId = '';
+          cardPhotos = [];
+          siteMenuTab = 'card_list';
+          void loadSiteMenuPage();
+          toast('Card salvo com sucesso.');
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+
+    const search = document.querySelector('#cards-search');
+    if (search) {
+      search.addEventListener('input', () => {
+        const table = document.querySelector('#cards-table');
+        if (table) table.innerHTML = siteCardRows(search.value);
+        bindSiteCardActions();
+      });
+    }
+
+    bindSiteCardActions();
+  }
+
+  function bindSiteCardActions() {
+    workspace.querySelectorAll('[data-site-card-edit]').forEach(btn => btn.addEventListener('click', () => {
+      editingCardId = btn.dataset.siteCardEdit;
+      const c = siteCards.find(item => item.id === editingCardId);
+      cardPhotos = (c?.photos || []).map(p => p.id);
+      siteMenuTab = 'card_editor';
+      renderSiteMenu();
+      workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});
+    }));
+    workspace.querySelectorAll('[data-site-card-delete]').forEach(btn => btn.addEventListener('click', async () => {
+      const selected = siteCards.find(item => item.id === btn.dataset.siteCardDelete);
+      if (!selected || !confirm(`Excluir o card "${selected.titulo}"?`)) return;
+      btn.disabled = true;
+      try {
+        await api('deleteSiteCard', {id: selected.id});
+        siteCards = siteCards.filter(item => item.id !== selected.id);
+        if (editingCardId === selected.id) {
+          editingCardId = '';
+          cardPhotos = [];
+        }
+        siteMenuTab = 'card_list';
+        renderSiteMenu();
+        toast('Card excluído com sucesso.');
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, true);
+      }
     }));
   }
 
