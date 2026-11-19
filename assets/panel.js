@@ -9,6 +9,7 @@
   let clientsTab = 'editor';
   let editingClientId = '';
   let selectedAccess = null;
+  let settingsTab = 'access';
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
@@ -165,14 +166,161 @@
     try {
       users = await api('listUsers');
       if (activePage !== 'settings') return;
-      workspace.innerHTML = `<section class="content-card">
-        <div class="card-head"><div><h2>Acessos por usuário</h2><p>Selecione um usuário pela lupa e defina os módulos disponíveis.</p></div></div>
-        <div class="settings-content"><div class="field"><label for="access-user">Usuário selecionado</label>
-          <div class="settings-selector"><input id="access-user" value="" placeholder="Selecione um usuário" readonly><button class="button" id="find-access-user" type="button" aria-label="Buscar usuário">${searchIcon}</button></div></div>
-          <div id="access-editor" class="empty">Clique na lupa para escolher um usuário.</div>
-        </div></section>`;
-      document.querySelector('#find-access-user').addEventListener('click', openUserPicker);
+      renderSettings();
     } catch (error) { if (activePage === 'settings') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`; }
+  }
+  function renderSettings() {
+    workspace.innerHTML = `<div class="users-tabs" role="tablist" aria-label="Configurações">
+      <button class="users-tab ${settingsTab === 'access' ? 'active' : ''}" type="button" role="tab" data-settings-tab="access" aria-selected="${settingsTab === 'access'}">Acessos</button>
+      <button class="users-tab ${settingsTab === 'drive' ? 'active' : ''}" type="button" role="tab" data-settings-tab="drive" aria-selected="${settingsTab === 'drive'}">BD DRIVE</button>
+    </div>
+    <section class="content-card users-tab-panel" data-settings-panel="access" ${settingsTab === 'access' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>Acessos por usuário</h2><p>Selecione um usuário pela lupa e defina os módulos disponíveis.</p></div></div>
+      <div class="settings-content"><div class="field"><label for="access-user">Usuário selecionado</label>
+        <div class="settings-selector"><input id="access-user" value="${selectedAccess ? `${escapeHtml(selectedAccess.user.nome)} — ${escapeHtml(selectedAccess.user.email)}` : ''}" placeholder="Selecione um usuário" readonly><button class="button" id="find-access-user" type="button" aria-label="Buscar usuário">${searchIcon}</button></div></div>
+        <div id="access-editor" class="${selectedAccess ? '' : 'empty'}">${selectedAccess ? '' : 'Clique na lupa para escolher um usuário.'}</div>
+      </div>
+    </section>
+    <section class="content-card users-tab-panel" data-settings-panel="drive" ${settingsTab === 'drive' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>BD DRIVE — Banco de dados e infraestrutura</h2><p>Pasta do Google Drive com os arquivos CSV, configurações do Apps Script, Vercel e GitHub.</p></div>
+        <a class="button button-drive" href="https://drive.google.com/drive/folders/1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">📁</span> Abrir pasta no Google Drive</a>
+      </div>
+      <div class="settings-content">
+        <h3 class="settings-subtitle">Arquivos do Banco de Dados (Google Drive)</h3>
+        <p class="helper">Abaixo estão listados todos os arquivos e tabelas CSV armazenados na pasta raiz do projeto SOLO no Google Drive (ID: <code>1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva</code>):</p>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Arquivo</th>
+                <th>Tipo</th>
+                <th>Descrição do conteúdo</th>
+                <th>Propriedade de Script</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>usuarios.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Cadastro de usuários da equipe SOLO, perfis (Administrador/Operador), status e senhas criptografadas (PBKDF2/HMAC-SHA256).</td>
+                <td><code>USERS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>configuracoes.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Controle granular de permissões e acessos por módulo (Visão geral, Usuários, Clientes, Pedidos, Financeiro) para cada operador.</td>
+                <td><code>SETTINGS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>clientes.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Cadastro de clientes da SOLO com nome completo, e-mail, WhatsApp (com DDD) e data de cadastro.</td>
+                <td><code>CLIENTS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>pedidos.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Pedidos realizados pelo catálogo do site e portal do cliente, com itens JSON, valor total, entrega, chave de idempotência e hash.</td>
+                <td><code>ORDERS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>contas_receber.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Contas a receber do módulo financeiro, lançamentos avulsos e vínculos automáticos com pedidos recebidos.</td>
+                <td><code>RECEIVABLES_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>contas_pagar.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Contas a pagar do módulo financeiro, fornecedores, categorias de despesas, datas de vencimento e pagamentos.</td>
+                <td><code>PAYABLES_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>fotos-perfil</b></td>
+                <td><span class="badge">Pasta</span></td>
+                <td>Subpasta privada para armazenamento seguro das fotos de perfil dos usuários em formato PNG/JPEG recortadas.</td>
+                <td><code>PHOTO_FOLDER_ID</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="settings-subtitle" style="margin-top:32px;">Configurações Técnicas de Infraestrutura</h3>
+        <div class="infra-grid">
+          <div class="infra-card">
+            <div class="infra-card-header">
+              <span class="infra-icon">⚡</span>
+              <div>
+                <h4>Google Apps Script (Backend)</h4>
+                <small>API REST e regras de negócio</small>
+              </div>
+            </div>
+            <div class="infra-card-body">
+              <div class="infra-item"><label>Script ID</label><code>1A1B47HsMVtTwnIz4v2obinIrvKbfMAITYdOfLJ4mqFV0GYa3uhk6CyM3</code></div>
+              <div class="infra-item"><label>Deployment ID (Ativo)</label><code>AKfycbzXCzGYjhvPc7djdz99wdXorNgxWoBeQf_S_V2VC0oqtgUvg-MJifCW7uDlY0SeiEfz</code></div>
+              <div class="infra-item"><label>URL do Web App</label><a href="https://script.google.com/macros/s/AKfycbzXCzGYjhvPc7djdz99wdXorNgxWoBeQf_S_V2VC0oqtgUvg-MJifCW7uDlY0SeiEfz/exec" target="_blank" rel="noopener noreferrer" class="link-external">Abrir endpoint /exec ↗</a></div>
+              <div class="infra-item"><label>Execução</label><span>Proprietário (eduperalles@gmail.com) · Acesso: Qualquer pessoa · V8</span></div>
+            </div>
+            <div class="infra-card-footer">
+              <a class="tiny-button" href="https://script.google.com/home/projects/1A1B47HsMVtTwnIz4v2obinIrvKbfMAITYdOfLJ4mqFV0GYa3uhk6CyM3/edit" target="_blank" rel="noopener noreferrer">Abrir Editor do Apps Script ↗</a>
+            </div>
+          </div>
+
+          <div class="infra-card">
+            <div class="infra-card-header">
+              <span class="infra-icon">▲</span>
+              <div>
+                <h4>Vercel (Hospedagem Frontend)</h4>
+                <small>Deploy contínuo e CDN global</small>
+              </div>
+            </div>
+            <div class="infra-card-body">
+              <div class="infra-item"><label>Domínio Oficial</label><a href="https://soloatelie.com.br" target="_blank" rel="noopener noreferrer" class="link-external">soloatelie.com.br ↗</a></div>
+              <div class="infra-item"><label>Domínio Vercel</label><a href="https://solo-blond.vercel.app" target="_blank" rel="noopener noreferrer" class="link-external">solo-blond.vercel.app ↗</a></div>
+              <div class="infra-item"><label>Painel Administrativo</label><a href="https://soloatelie.com.br/admin/dashboard.html" target="_blank" rel="noopener noreferrer" class="link-external">soloatelie.com.br/admin/dashboard.html ↗</a></div>
+              <div class="infra-item"><label>Gatilho de Deploy</label><span>Push automático na branch <code>main</code></span></div>
+            </div>
+            <div class="infra-card-footer">
+              <a class="tiny-button" href="https://vercel.com" target="_blank" rel="noopener noreferrer">Acessar Console Vercel ↗</a>
+            </div>
+          </div>
+
+          <div class="infra-card">
+            <div class="infra-card-header">
+              <span class="infra-icon">🐙</span>
+              <div>
+                <h4>GitHub (Repositório do Projeto)</h4>
+                <small>Controle de versão e código-fonte</small>
+              </div>
+            </div>
+            <div class="infra-card-body">
+              <div class="infra-item"><label>Repositório</label><a href="https://github.com/eduperalles/SOLO" target="_blank" rel="noopener noreferrer" class="link-external">github.com/eduperalles/SOLO ↗</a></div>
+              <div class="infra-item"><label>Branch Principal</label><code>main</code></div>
+              <div class="infra-item"><label>Diretório Local</label><code>D:\\PERALLY\\CLIENTES\\SOLO</code></div>
+              <div class="infra-item"><label>Visibilidade</label><span>Público / Vercel Production Integration</span></div>
+            </div>
+            <div class="infra-card-footer">
+              <a class="tiny-button" href="https://github.com/eduperalles/SOLO" target="_blank" rel="noopener noreferrer">Abrir Repositório no GitHub ↗</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>`;
+
+    workspace.querySelectorAll('[data-settings-tab]').forEach(button => button.addEventListener('click', () => {
+      settingsTab = button.dataset.settingsTab;
+      workspace.querySelectorAll('[data-settings-tab]').forEach(tab => {
+        const active = tab.dataset.settingsTab === settingsTab;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      workspace.querySelectorAll('[data-settings-panel]').forEach(panel => {
+        panel.hidden = panel.dataset.settingsPanel !== settingsTab;
+      });
+    }));
+
+    document.querySelector('#find-access-user')?.addEventListener('click', openUserPicker);
+    if (selectedAccess) renderAccessEditor();
   }
   function openUserPicker() {
     const dialog = document.createElement('dialog');

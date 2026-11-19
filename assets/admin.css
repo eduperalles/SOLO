@@ -233,7 +233,23 @@ dialog::backdrop { background: rgba(0,0,0,.65); backdrop-filter: blur(3px); }
 .picker-user { display:flex; width:100%; align-items:center; justify-content:space-between; gap:12px; text-align:left; background:white; border:0; border-bottom:1px solid var(--line); padding:16px 4px; cursor:pointer; font:inherit; }
 .picker-user:hover { background:#faf7f2; }
 .picker-user span { overflow-wrap:anywhere; }
-@media(max-width:600px) { .settings-content { padding:16px; } .picker-user { align-items:flex-start; flex-direction:column; } .access-modules { grid-template-columns:1fr; } }
+.button-drive { background: #1a73e8; border-color: #1557b0; color: white; text-decoration: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; transition: .2s; }
+.button-drive:hover { background: #1557b0; border-color: #0d47a1; color: white; }
+.settings-subtitle { margin: 0 0 8px; font-size: 16px; font-weight: 700; color: var(--ink); }
+.infra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; margin-top: 14px; }
+.infra-card { border: 1px solid var(--line); border-radius: 10px; background: #fbfaf7; display: flex; flex-direction: column; overflow: hidden; }
+.infra-card-header { display: flex; align-items: center; gap: 12px; padding: 16px 18px; background: white; border-bottom: 1px solid var(--line); }
+.infra-icon { font-size: 22px; line-height: 1; }
+.infra-card-header h4 { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+.infra-card-header small { color: var(--muted); font-size: 11px; }
+.infra-card-body { padding: 16px 18px; display: grid; gap: 12px; flex: 1; }
+.infra-item label { display: block; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.infra-item span, .infra-item a, .infra-item code { font-size: 12px; line-height: 1.5; word-break: break-all; }
+.infra-item code { background: #eeeae1; padding: 2px 6px; border-radius: 4px; font-family: Consolas, monospace; }
+.link-external { color: #1a73e8; text-decoration: none; font-weight: 600; }
+.link-external:hover { text-decoration: underline; color: #1557b0; }
+.infra-card-footer { padding: 12px 18px; background: white; border-top: 1px solid var(--line); text-align: right; }
+@media(max-width:600px) { .settings-content { padding:16px; } .picker-user { align-items:flex-start; flex-direction:column; } .access-modules { grid-template-columns:1fr; } .infra-grid { grid-template-columns: 1fr; } }
 
 .sidebar nav #registrations-toggle { width:100%; }
 .nav-chevron { margin-left:auto; transition:transform .2s; }
