@@ -1,5 +1,6 @@
 const DRIVE_FOLDER_ID_ = '1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva';
 const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status','foto_arquivo_id','foto_atualizada_em','criado_em','atualizado_em'];
+const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em'];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
@@ -32,6 +33,12 @@ function dispatch_(request) {
     case 'getMyProfile': return ownProfile_(actor);
     case 'getMyProfilePhoto': return ownPhoto_(actor);
     case 'saveMyProfile': return saveMyProfile_(actor, request.record || {});
+    case 'listFinanceReceivables': return listFinance_(actor, 'receivables');
+    case 'saveFinanceReceivable': return saveFinance_(actor, 'receivables', request.record || {});
+    case 'deleteFinanceReceivable': return deleteFinance_(actor, 'receivables', request.id);
+    case 'listFinancePayables': return listFinance_(actor, 'payables');
+    case 'saveFinancePayable': return saveFinance_(actor, 'payables', request.record || {});
+    case 'deleteFinancePayable': return deleteFinance_(actor, 'payables', request.id);
     default: throw Error('Operação não reconhecida.');
   }
 }
@@ -46,13 +53,16 @@ function setupSolo() {
   const photos = folder.getFoldersByName('fotos-perfil');
   const photoFolder = photos.hasNext() ? photos.next() : folder.createFolder('fotos-perfil');
   props.setProperty('PHOTO_FOLDER_ID', photoFolder.getId());
+  setupFinanceFiles_(folder, props);
 
   const email = normalizeEmail_(props.getProperty('INITIAL_ADMIN_EMAIL'));
   const password = String(props.getProperty('INITIAL_ADMIN_PASSWORD') || '');
-  if (!email || password.length < 4) throw Error('Configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD nas propriedades do script e execute novamente.');
+  if (!email) throw Error('Configure INITIAL_ADMIN_EMAIL nas propriedades do script e execute novamente.');
   withLock_(() => {
     const rows = readUsers_();
-    if (!rows.some(row => normalizeEmail_(row.email) === email)) {
+    const exists = rows.some(row => normalizeEmail_(row.email) === email);
+    if (!exists && password.length < 4) throw Error('Configure INITIAL_ADMIN_PASSWORD nas propriedades do script para criar o administrador inicial.');
+    if (!exists) {
       const salt = random_();
       rows.push({
         id: Utilities.getUuid(),
@@ -71,7 +81,107 @@ function setupSolo() {
     }
   });
   props.deleteProperty('INITIAL_ADMIN_PASSWORD');
-  return 'SOLO configurado; usuarios.csv e fotos-perfil estão na pasta do Drive.';
+  return 'SOLO configurado; usuários, fotos e os dois CSVs financeiros estão na pasta do Drive.';
+}
+
+function setupFinanceFiles_(folder, props) {
+  [
+    {key:'RECEIVABLES_FILE_ID', name:'contas_receber.csv'},
+    {key:'PAYABLES_FILE_ID', name:'contas_pagar.csv'}
+  ].forEach(table => {
+    const files = folder.getFilesByName(table.name);
+    const file = files.hasNext() ? files.next() : folder.createFile(table.name, csv_(FINANCE_COLUMNS_, []), 'text/csv');
+    props.setProperty(table.key, file.getId());
+  });
+}
+
+function financeFileId_(type) {
+  const key = type === 'receivables' ? 'RECEIVABLES_FILE_ID' : type === 'payables' ? 'PAYABLES_FILE_ID' : '';
+  const id = key && PropertiesService.getScriptProperties().getProperty(key);
+  if (!id) throw Error('Módulo financeiro não configurado. Execute setupSolo novamente.');
+  return id;
+}
+
+function readFinance_(type) {
+  const text = DriveApp.getFileById(financeFileId_(type)).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  if (!text.trim()) return [];
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift().map(String);
+  if (FINANCE_COLUMNS_.some(column => !headers.includes(column))) throw Error('Cabeçalho financeiro inválido.');
+  return matrix.filter(row => row.some(value => value !== '')).map(row => {
+    const record = {};
+    headers.forEach((header, index) => record[header] = row[index] || '');
+    return record;
+  });
+}
+
+function saveFinanceRows_(type, rows) {
+  DriveApp.getFileById(financeFileId_(type)).setContent(csv_(FINANCE_COLUMNS_, rows));
+}
+
+function listFinance_(actor, type) {
+  if (!actor) throw Error('Sessão inválida. Entre novamente.');
+  return readFinance_(type).map(record => ({...record, valor:Number(record.valor) || 0}));
+}
+
+function saveFinance_(actor, type, input) {
+  if (!actor) throw Error('Sessão inválida. Entre novamente.');
+  const id = String(input.id || '');
+  const descricao = String(input.descricao || '').trim();
+  const pessoa = String(input.pessoa || '').trim();
+  const categoria = String(input.categoria || '').trim();
+  const observacoes = String(input.observacoes || '').trim();
+  const amount = Number(String(input.valor ?? '').replace(',', '.'));
+  const due = String(input.data_vencimento || '');
+  const paid = String(input.data_pagamento || '');
+  const status = String(input.status || 'pendente');
+  if (descricao.length < 2 || descricao.length > 180 || pessoa.length > 180 || categoria.length > 120 || observacoes.length > 2000) {
+    throw Error('Revise descrição, pessoa, categoria e observações.');
+  }
+  if (!Number.isFinite(amount) || amount < 0.01 || amount > 999999999) throw Error('Informe um valor válido maior que zero.');
+  if (!['pendente','pago'].includes(status)) throw Error('Status financeiro inválido.');
+  if (!isFinanceDate_(due) || (paid && !isFinanceDate_(paid))) throw Error('Informe datas financeiras válidas.');
+  if (status === 'pago' && !paid) throw Error('Informe a data de pagamento para uma conta paga.');
+  if (status === 'pendente' && paid) throw Error('Remova a data de pagamento de uma conta pendente.');
+  return withLock_(() => {
+    const rows = readFinance_(type);
+    const old = id ? rows.find(row => row.id === id) : null;
+    if (id && !old) throw Error('Registro financeiro não encontrado.');
+    const record = {
+      id:old ? old.id : Utilities.getUuid(),
+      descricao,
+      pessoa,
+      categoria,
+      valor:amount.toFixed(2),
+      data_vencimento:due,
+      data_pagamento:status === 'pago' ? paid : '',
+      status,
+      observacoes,
+      criado_em:old ? old.criado_em : now_(),
+      atualizado_em:now_()
+    };
+    if (old) rows[rows.findIndex(row => row.id === id)] = record;
+    else rows.push(record);
+    saveFinanceRows_(type, rows);
+    return {...record, valor:amount};
+  });
+}
+
+function deleteFinance_(actor, type, id) {
+  if (!actor) throw Error('Sessão inválida. Entre novamente.');
+  return withLock_(() => {
+    const rows = readFinance_(type);
+    const selected = rows.find(row => row.id === String(id));
+    if (!selected) throw Error('Registro financeiro não encontrado.');
+    saveFinanceRows_(type, rows.filter(row => row.id !== selected.id));
+    return {deleted:true};
+  });
+}
+
+function isFinanceDate_(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T12:00:00Z');
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0,10) === value;
 }
 
 function login_(request) {

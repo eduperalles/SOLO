@@ -8,6 +8,9 @@
   let activePage = 'dashboard';
   let editingId = '';
   let usersTab = 'editor';
+  let financeTab = 'receivables';
+  let financeRows = {receivables:[], payables:[]};
+  let editingFinanceId = '';
   let profile = null;
   let profilePhoto = '';
   let image = null;
@@ -30,14 +33,27 @@
   };
   async function api(action, payload = {}) {
     if (!API) throw new Error('API administrativa não configurada.');
-    const response = await fetch(API, {
-      method: 'POST',
-      headers: {'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({action, token, ...payload})
-    });
-    const result = await response.json();
-    if (!result.ok) throw new Error(result.message || 'Falha ao processar a solicitação.');
-    return result.data;
+    const titles = {
+      validateSession:'Validando acesso',
+      listUsers:'Carregando usuários',
+      listFinanceReceivables:'Carregando contas a receber',
+      listFinancePayables:'Carregando contas a pagar'
+    };
+    const finishLoading = window.SoloLoading?.start(titles[action] || 'Salvando informações');
+    try {
+      const response = await fetch(API, {
+        method: 'POST',
+        headers: {'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({action, token, ...payload})
+      });
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message || 'Falha ao processar a solicitação.');
+      await finishLoading?.();
+      return result.data;
+    } catch (error) {
+      await finishLoading?.(false);
+      throw error;
+    }
   }
   const avatarMarkup = (person, className = '', photo = '') => `<span class="avatar ${className}">${photo
     ? `<img src="${escapeHtml(photo)}" alt="Foto de ${escapeHtml(person?.nome || 'usuário')}">`
@@ -72,10 +88,11 @@
     if (page === 'users' && user?.perfil !== 'admin') return;
     activePage = page;
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'finance' ? 'Financeiro' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') renderDashboard();
-    else void loadUsersPage();
+    else if (page === 'users') void loadUsersPage();
+    else if (page === 'finance') void loadFinancePage();
   }
   document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.page)));
 
@@ -85,16 +102,16 @@
     workspace.innerHTML = `
       <section class="welcome">
         ${avatarMarkup(user, '', profilePhoto)}
-        <div><h2>Olá, ${escapeHtml(user?.nome || 'equipe SOLO')}.</h2><p>O painel está pronto para receber os próximos módulos do projeto.</p></div>
+        <div><h2>Olá, ${escapeHtml(user?.nome || 'equipe SOLO')}.</h2><p>Gerencie usuários e acompanhe o financeiro do SOLO.</p></div>
       </section>
       <div class="stats">
         <div class="stat"><span>Usuários cadastrados</span><strong>${userCount}</strong></div>
-        <div class="stat"><span>Módulos ativos</span><strong>${admin ? 1 : 0}</strong></div>
+        <div class="stat"><span>Módulos ativos</span><strong>${admin ? 2 : 1}</strong></div>
         <div class="stat"><span>Próxima etapa</span><strong style="font-size:18px">Em definição</strong></div>
       </div>
       <section class="content-card">
-        <div class="card-head"><div><h2>Visão inicial</h2><p>Nenhum módulo adicional foi habilitado nesta entrega.</p></div></div>
-        <div class="empty">A administração de usuários já está disponível. Os demais módulos serão adicionados nos próximos passos.</div>
+        <div class="card-head"><div><h2>Visão inicial</h2><p>Usuários e financeiro estão disponíveis.</p></div></div>
+        <div class="empty">Use o menu lateral para cadastrar acessos ou organizar contas a receber e contas a pagar.</div>
       </section>`;
   }
 
@@ -214,6 +231,148 @@
         usersTab = 'list';
         renderUsers();
         toast('Usuário excluído.');
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message, true);
+      }
+    }));
+  }
+
+  async function loadFinancePage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando módulo financeiro…</div>';
+    try {
+      const [receivables, payables] = await Promise.all([
+        api('listFinanceReceivables'),
+        api('listFinancePayables')
+      ]);
+      financeRows = {receivables, payables};
+      renderFinance();
+    } catch (error) {
+      workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+      if (/sessão|session|autentic/i.test(error.message)) clearSession();
+    }
+  }
+
+  const money = value => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(Number(value) || 0);
+  const financeLabel = type => type === 'receivables' ? 'Contas a receber' : 'Contas a pagar';
+  const financePersonLabel = type => type === 'receivables' ? 'Cliente / responsável' : 'Fornecedor / beneficiário';
+  function financeRowsMarkup(type, query = '') {
+    const search = query.trim().toLocaleLowerCase('pt-BR');
+    const rows = financeRows[type].filter(row =>
+      `${row.descricao} ${row.pessoa} ${row.categoria} ${row.status}`.toLocaleLowerCase('pt-BR').includes(search)
+    );
+    if (!rows.length) return '<div class="empty">Nenhum lançamento financeiro encontrado.</div>';
+    return `<div class="data-table-wrap"><table class="data-table finance-table"><thead><tr><th>Descrição</th><th>${financePersonLabel(type)}</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead><tbody>${rows.map(row => `
+      <tr>
+        <td><b>${escapeHtml(row.descricao)}</b>${row.categoria ? `<small class="table-subtext">${escapeHtml(row.categoria)}</small>` : ''}</td>
+        <td>${escapeHtml(row.pessoa || '—')}</td>
+        <td><strong>${money(row.valor)}</strong></td>
+        <td>${escapeHtml(formatDate(row.data_vencimento))}</td>
+        <td><span class="badge ${row.status === 'pago' ? '' : 'finance-pending'}">${row.status === 'pago' ? 'Pago' : 'Pendente'}</span></td>
+        <td><div class="row-actions"><button class="tiny-button" type="button" data-finance-edit="${escapeHtml(row.id)}">Editar</button><button class="tiny-button danger" type="button" data-finance-delete="${escapeHtml(row.id)}">Excluir</button></div></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  function formatDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '—';
+    const [year, month, day] = value.split('-');
+    return `${day}/${month}/${year}`;
+  }
+  function renderFinance() {
+    const current = financeRows[financeTab].find(row => row.id === editingFinanceId);
+    const type = financeTab;
+    workspace.innerHTML = `
+      <div class="users-tabs finance-tabs" role="tablist" aria-label="Módulo financeiro">
+        <button class="users-tab ${type === 'receivables' ? 'active' : ''}" type="button" role="tab" data-finance-tab="receivables" aria-selected="${type === 'receivables'}">Contas a receber <span>${financeRows.receivables.length}</span></button>
+        <button class="users-tab ${type === 'payables' ? 'active' : ''}" type="button" role="tab" data-finance-tab="payables" aria-selected="${type === 'payables'}">Contas a pagar <span>${financeRows.payables.length}</span></button>
+      </div>
+      <section class="content-card finance-summary">
+        <div><span>Total pendente</span><strong>${money(financeRows[type].filter(row => row.status === 'pendente').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
+        <div><span>Total pago</span><strong>${money(financeRows[type].filter(row => row.status === 'pago').reduce((sum, row) => sum + (Number(row.valor) || 0), 0))}</strong></div>
+        <div><span>Lançamentos</span><strong>${financeRows[type].length}</strong></div>
+      </section>
+      <section class="content-card">
+        <div class="card-head"><div><h2>${current ? 'Editar lançamento' : `Nova ${type === 'receivables' ? 'conta a receber' : 'conta a pagar'}`}</h2><p>${financeLabel(type)}.</p></div></div>
+        <form id="finance-form" class="editor" novalidate>
+          <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
+          <div class="field"><label for="finance-description">Descrição *</label><input id="finance-description" name="descricao" maxlength="180" value="${escapeHtml(current?.descricao || '')}" required></div>
+          <div class="field"><label for="finance-person">${financePersonLabel(type)}</label><input id="finance-person" name="pessoa" maxlength="180" value="${escapeHtml(current?.pessoa || '')}"></div>
+          <div class="field"><label for="finance-category">Categoria</label><input id="finance-category" name="categoria" maxlength="120" value="${escapeHtml(current?.categoria || '')}" placeholder="Ex.: Serviços, fornecedores"></div>
+          <div class="field"><label for="finance-value">Valor (R$) *</label><input id="finance-value" name="valor" type="number" min="0.01" step="0.01" inputmode="decimal" value="${escapeHtml(current?.valor || '')}" required></div>
+          <div class="field"><label for="finance-due">Vencimento *</label><input id="finance-due" name="data_vencimento" type="date" value="${escapeHtml(current?.data_vencimento || '')}" required></div>
+          <div class="field"><label for="finance-status">Status *</label><select id="finance-status" name="status"><option value="pendente" ${current?.status !== 'pago' ? 'selected' : ''}>Pendente</option><option value="pago" ${current?.status === 'pago' ? 'selected' : ''}>Pago</option></select></div>
+          <div class="field"><label for="finance-paid">Data do pagamento</label><input id="finance-paid" name="data_pagamento" type="date" value="${escapeHtml(current?.data_pagamento || '')}" ${current?.status === 'pago' ? '' : 'disabled'}></div>
+          <div class="field full"><label for="finance-notes">Observações</label><textarea id="finance-notes" name="observacoes" maxlength="2000" rows="3">${escapeHtml(current?.observacoes || '')}</textarea></div>
+          <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar lançamento</button></div>
+        </form>
+      </section>
+      <section class="content-card">
+        <div class="card-head"><div><h2>${financeLabel(type)}</h2><p>Registros sincronizados com o CSV privado do Drive.</p></div><div class="toolbar"><input id="finance-search" aria-label="Buscar lançamentos" placeholder="Buscar lançamentos…"></div></div>
+        <div id="finance-table">${financeRowsMarkup(type)}</div>
+      </section>`;
+    bindFinance();
+  }
+  function bindFinance() {
+    const form = document.querySelector('#finance-form');
+    const status = form.querySelector('[name="status"]');
+    const paid = form.querySelector('[name="data_pagamento"]');
+    const search = document.querySelector('#finance-search');
+    workspace.querySelectorAll('[data-finance-tab]').forEach(button => button.addEventListener('click', () => {
+      financeTab = button.dataset.financeTab;
+      editingFinanceId = '';
+      renderFinance();
+    }));
+    status.addEventListener('change', () => {
+      paid.disabled = status.value !== 'pago';
+      if (status.value !== 'pago') paid.value = '';
+      else if (!paid.value) paid.value = new Date().toISOString().slice(0,10);
+    });
+    form.addEventListener('reset', event => {
+      event.preventDefault();
+      editingFinanceId = '';
+      renderFinance();
+    });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const button = form.querySelector('[type="submit"]');
+      button.disabled = true;
+      const record = Object.fromEntries(new FormData(form).entries());
+      try {
+        const isReceivable = financeTab === 'receivables';
+        const saved = await api(isReceivable ? 'saveFinanceReceivable' : 'saveFinancePayable', {record});
+        const index = financeRows[financeTab].findIndex(row => row.id === saved.id);
+        if (index >= 0) financeRows[financeTab][index] = saved;
+        else financeRows[financeTab].push(saved);
+        editingFinanceId = '';
+        renderFinance();
+        toast('Lançamento financeiro salvo.');
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    search.addEventListener('input', () => {
+      document.querySelector('#finance-table').innerHTML = financeRowsMarkup(financeTab, search.value);
+      bindFinanceTableActions();
+    });
+    bindFinanceTableActions();
+  }
+  function bindFinanceTableActions() {
+    workspace.querySelectorAll('[data-finance-edit]').forEach(button => button.addEventListener('click', () => {
+      editingFinanceId = button.dataset.financeEdit;
+      renderFinance();
+      document.querySelector('#finance-form')?.scrollIntoView({behavior:'smooth'});
+    }));
+    workspace.querySelectorAll('[data-finance-delete]').forEach(button => button.addEventListener('click', async () => {
+      const selected = financeRows[financeTab].find(row => row.id === button.dataset.financeDelete);
+      if (!selected || !confirm(`Excluir "${selected.descricao}"?`)) return;
+      button.disabled = true;
+      try {
+        await api(financeTab === 'receivables' ? 'deleteFinanceReceivable' : 'deleteFinancePayable', {id:selected.id});
+        financeRows[financeTab] = financeRows[financeTab].filter(row => row.id !== selected.id);
+        renderFinance();
+        toast('Lançamento excluído.');
       } catch (error) {
         button.disabled = false;
         toast(error.message, true);
