@@ -32,7 +32,8 @@ function dispatch_(request) {
     case 'customerOrders': return customerOrders_(request);
     case 'customerLogout': return customerLogout_(request);
     case 'listOrders': return listOrders_(actor);
-    case 'retryOrder': module_(actor, 'orders'); return withLock_(() => { const rows=readOrders_(); const order=rows.find(row=>row.id===String(request.id || '')); if (!order) throw Error('Pedido não encontrado.'); if (order.status !== 'recebido') finishOrder_(order,rows); return {saved:true}; });
+    case 'retryOrder': module_(actor, 'orders'); return withLock_(() => { const rows=readOrders_(); const order=rows.find(row=>row.id===String(request.id || '')); if (!order) throw Error('Pedido não encontrado.'); if (order.status === 'excluindo') throw Error('Este pedido está com exclusão pendente. Tente excluí-lo novamente.'); if (order.status !== 'recebido') finishOrder_(order,rows); return {saved:true}; });
+    case 'deleteOrder': return deleteOrder_(actor, request.id);
     case 'login': return login_(request);
     case 'logout': return logout_(request);
     case 'validateSession': return publicUser_(actor);
@@ -719,6 +720,7 @@ function placeOrder_(request) {
     const orders = readOrders_();
     let order = orders.find(row => row.chave_idempotencia === key);
     if (order && order.payload_hash !== fingerprint) throw Error('Este envio já pertence a outro pedido. Reabra a finalização.');
+    if (order && order.status === 'excluindo') throw Error('Este pedido está com exclusão pendente. Fale com a loja.');
     if (!order) {
       const today = brazilDate_();
       if (orders.filter(row => row.whatsapp === input.whatsapp && row.criado_em.slice(0,10) === today).length >= 20) throw Error('Limite de pedidos atingido. Fale com a loja.');
@@ -742,6 +744,32 @@ function listOrders_(actor) {
   module_(actor, 'orders');
   const finance = readFinance_('receivables');
   return readOrders_().sort((a,b) => b.criado_em.localeCompare(a.criado_em)).map(order => orderView_(order, finance));
+}
+function deleteOrder_(actor, id) {
+  module_(actor, 'orders');
+  return withLock_(() => {
+    const orders = readOrders_();
+    const order = orders.find(row => row.id === String(id || ''));
+    if (!order) throw Error('Pedido não encontrado.');
+    const finance = readFinance_('receivables');
+    if (order.conta_receber_id && finance.some(row => row.id === order.conta_receber_id && row.pedido_id && row.pedido_id !== order.id)) {
+      throw Error('O vínculo da conta a receber pertence a outro pedido. Verifique o financeiro antes de excluir.');
+    }
+    const remaining = finance.filter(row => row.pedido_id !== order.id && !(order.conta_receber_id && row.id === order.conta_receber_id));
+    if (order.status !== 'excluindo') {
+      order.status = 'excluindo';
+      order.atualizado_em = now_();
+      saveOrders_(orders);
+    }
+    try {
+      if (remaining.length !== finance.length) saveFinanceRows_('receivables', remaining);
+      saveOrders_(orders.filter(row => row.id !== order.id));
+    } catch (error) {
+      console.error(error);
+      throw Error('Exclusão incompleta. Tente excluir o pedido novamente para concluir.');
+    }
+    return {deleted:true,receivableDeleted:remaining.length !== finance.length};
+  });
 }
 function requestCustomerCode_(request) {
   const identifier = String(request.identifier || '').trim().toLowerCase();

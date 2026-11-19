@@ -52,6 +52,7 @@
       listClients:'Carregando clientes',
       listOrders:'Carregando pedidos',
       retryOrder:'Concluindo gravação do pedido',
+      deleteOrder:'Excluindo pedido',
       createClient:'Salvando cliente',
       updateClient:'Salvando cliente',
       deleteClient:'Excluindo cliente',
@@ -248,7 +249,17 @@
     try {
       const orders=await api('listOrders');
       if(activePage !== 'orders')return;
-      window.SoloOrderView.render(workspace,orders,{admin:true,onRetry:async id=>{try {await api('retryOrder',{id});await loadOrdersPage();toast('Gravação concluída.');}catch(error){toast(error.message,true);}}});
+      window.SoloOrderView.render(workspace,orders,{admin:true,onRetry:async id=>{try {await api('retryOrder',{id});await loadOrdersPage();toast('Gravação concluída.');}catch(error){toast(error.message,true);}},onDelete:async order=>{
+        if(!confirm(`Excluir o pedido ${order.numero}?\n\nA conta a receber vinculada também será excluída, caso exista. Esta ação não pode ser desfeita.`))return;
+        try {
+          const result=await api('deleteOrder',{id:order.id});
+          await loadOrdersPage();
+          toast(result.receivableDeleted?'Pedido e conta a receber excluídos.':'Pedido excluído. Nenhuma conta a receber vinculada foi encontrada.');
+        } catch(error) {
+          await loadOrdersPage();
+          toast(error.message,true);
+        }
+      }});
     }catch(error){if(activePage==='orders')workspace.innerHTML=`<div class="workspace-state">${escapeHtml(error.message)}</div>`;}
   }
 
