@@ -1,14 +1,15 @@
 const DRIVE_FOLDER_ID_ = '1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva';
 const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status','foto_arquivo_id','foto_atualizada_em','criado_em','atualizado_em'];
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:1,settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:2,clients:!!props.getProperty('CLIENTS_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -31,6 +32,10 @@ function dispatch_(request) {
     case 'getModuleAccess': return getModuleAccess_(actor, request.id);
     case 'saveModuleAccess': return saveModuleAccess_(actor, request);
     case 'listUsers': module_(actor, 'users'); return readUsers_().map(adminUser_);
+    case 'listClients': module_(actor, 'clients'); return readClients_();
+    case 'createClient': return saveClient_(actor, request.record || {}, 'create');
+    case 'updateClient': return saveClient_(actor, request.record || {}, 'update');
+    case 'deleteClient': return deleteClient_(actor, request.id, request.version);
     case 'getUserPhotos': return getUserPhotos_(actor, request.ids);
     case 'createUser': return saveUser_(actor, request.record || {}, 'create');
     case 'updateUser': return saveUser_(actor, request.record || {}, 'update');
@@ -60,6 +65,7 @@ function setupSolo() {
   props.setProperty('PHOTO_FOLDER_ID', photoFolder.getId());
   setupFinanceFiles_(folder, props);
   setupSettings();
+  setupClients();
 
   const email = normalizeEmail_(props.getProperty('INITIAL_ADMIN_EMAIL'));
   const password = String(props.getProperty('INITIAL_ADMIN_PASSWORD') || '');
@@ -107,15 +113,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => key !== 'clients').some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -138,14 +144,85 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || Object.keys(input).sort().join(',') !== 'dashboard,finance,users' || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
+  });
+}
+
+function setupClients() {
+  return withLock_(() => {
+    const props = PropertiesService.getScriptProperties();
+    const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+    const files = folder.getFilesByName('clientes.csv');
+    const file = files.hasNext() ? files.next() : folder.createFile('clientes.csv', csv_(CLIENT_COLUMNS_, []), 'text/csv');
+    props.setProperty('CLIENTS_FILE_ID', file.getId());
+    const accessId = props.getProperty('SETTINGS_FILE_ID');
+    if (accessId) {
+      const rows = readAccess_();
+      rows.forEach(row => { if (row.clients === undefined) row.clients = '0'; });
+      DriveApp.getFileById(accessId).setContent(csv_(ACCESS_COLUMNS_, rows));
+    }
+    return 'Cadastro de clientes pronto; clientes.csv na pasta SOLO e permissões existentes preservadas.';
+  });
+}
+
+function readClients_() {
+  const id = PropertiesService.getScriptProperties().getProperty('CLIENTS_FILE_ID');
+  if (!id) throw Error('Cadastro de clientes não configurado. Execute setupClients.');
+  const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (CLIENT_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de clientes.csv inválido.');
+  return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
+}
+
+function saveClientRows_(rows) {
+  const id = PropertiesService.getScriptProperties().getProperty('CLIENTS_FILE_ID');
+  if (!id) throw Error('Cadastro de clientes não configurado. Execute setupClients.');
+  DriveApp.getFileById(id).setContent(csv_(CLIENT_COLUMNS_, rows));
+}
+
+function saveClient_(actor, input, operation) {
+  module_(actor, 'clients');
+  const id = String(input.id || '');
+  const nome = String(input.nome || '').trim();
+  const email = normalizeEmail_(input.email);
+  const rawWhatsapp = String(input.whatsapp || '').trim();
+  const whatsapp = rawWhatsapp.replace(/\D/g, '');
+  const data = String(input.data_cadastro || '');
+  if (nome.length < 2 || nome.length > 180) throw Error('Informe o nome completo do cliente (2 a 180 caracteres).');
+  if (!validEmail_(email)) throw Error('Informe um e-mail válido.');
+  if (!/^[+\d() .-]+$/.test(rawWhatsapp) || !/^\d{10,15}$/.test(whatsapp)) throw Error('Informe um WhatsApp válido com DDD (10 a 15 dígitos).');
+  if (!isFinanceDate_(data)) throw Error('Informe uma data de cadastro válida.');
+  return withLock_(() => {
+    const rows = readClients_();
+    const index = operation === 'update' ? rows.findIndex(row => row.id === id) : -1;
+    const old = rows[index];
+    if (operation === 'update' && !old) throw Error('Cliente não encontrado.');
+    if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Cliente atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+    const stamp = now_();
+    const record = {id:old ? old.id : Utilities.getUuid(),nome,email,whatsapp,data_cadastro:data,criado_em:old ? old.criado_em : stamp,atualizado_em:stamp};
+    if (old) rows[index] = record; else rows.push(record);
+    saveClientRows_(rows);
+    return record;
+  });
+}
+
+function deleteClient_(actor, id, version) {
+  module_(actor, 'clients');
+  return withLock_(() => {
+    const rows = readClients_();
+    const selected = rows.find(row => row.id === String(id || ''));
+    if (!selected) throw Error('Cliente não encontrado.');
+    if (String(version || '') !== selected.atualizado_em) throw Error('Cliente atualizado por outra sessão. Atualize a lista antes de excluir.');
+    saveClientRows_(rows.filter(row => row.id !== selected.id));
+    return {deleted:true};
   });
 }
 

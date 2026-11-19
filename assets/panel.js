@@ -5,10 +5,14 @@
   const toastNode = document.querySelector('#toast');
   let user = JSON.parse(sessionStorage.getItem('solo_user') || 'null');
   let users = [];
+  let clients = [];
+  let clientsTab = 'editor';
+  let editingClientId = '';
   let selectedAccess = null;
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
+    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients');
   }
   let activePage = 'dashboard';
   let editingId = '';
@@ -45,6 +49,10 @@
     const titles = {
       validateSession:'Validando acesso',
       listUsers:'Carregando usuários',
+      listClients:'Carregando clientes',
+      createClient:'Salvando cliente',
+      updateClient:'Salvando cliente',
+      deleteClient:'Excluindo cliente',
       getModuleAccess:'Carregando permissões',
       saveModuleAccess:'Salvando permissões',
       listFinanceReceivables:'Carregando contas a receber',
@@ -79,6 +87,12 @@
     clearSession();
   }
   document.querySelectorAll('[data-logout]').forEach(button => button.addEventListener('click', logout));
+  document.querySelector('#registrations-toggle').addEventListener('click', event => {
+    const button = event.currentTarget;
+    const expanded = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(expanded));
+    document.querySelector('#registrations-items').hidden = !expanded;
+  });
   document.querySelector('#mobile-menu').addEventListener('click', () => document.querySelector('#sidebar').classList.toggle('open'));
 
   function paintIdentity(photo = profilePhoto) {
@@ -105,11 +119,17 @@
       return;
     }
     activePage = page;
+    if (['users','clients'].includes(page)) {
+      document.querySelector('#registrations-items').hidden = false;
+      document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
+    }
+    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') renderDashboard();
     else if (page === 'users') void loadUsersPage();
+    else if (page === 'clients') void loadClientsPage();
     else if (page === 'finance') void loadFinancePage();
     else if (page === 'settings') void loadSettingsPage();
   }
@@ -121,7 +141,7 @@
     workspace.innerHTML = `
       <section class="welcome">
         ${avatarMarkup(user, '', profilePhoto)}
-        <div><h2>Olá, ${escapeHtml(user?.nome || 'equipe SOLO')}.</h2><p>Gerencie usuários e acompanhe o financeiro do SOLO.</p></div>
+        <div><h2>Olá, ${escapeHtml(user?.nome || 'equipe SOLO')}.</h2><p>Gerencie usuários, clientes e acompanhe o financeiro do SOLO.</p></div>
       </section>
       <div class="stats">
         <div class="stat"><span>Usuários cadastrados</span><strong>${userCount}</strong></div>
@@ -129,7 +149,7 @@
         <div class="stat"><span>Próxima etapa</span><strong style="font-size:18px">Em definição</strong></div>
       </div>
       <section class="content-card">
-        <div class="card-head"><div><h2>Visão inicial</h2><p>Usuários e financeiro estão disponíveis.</p></div></div>
+        <div class="card-head"><div><h2>Visão inicial</h2><p>Cadastros e financeiro estão disponíveis.</p></div></div>
         <div class="empty">Use o menu lateral para cadastrar acessos ou organizar contas a receber e contas a pagar.</div>
       </section>`;
   }
@@ -200,7 +220,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -208,6 +228,105 @@
       } catch (error) { message.textContent = error.message; toast(error.message, true); }
       finally { button.disabled = false; }
     });
+  }
+
+  const todayInBrazil = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const displayClientDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value.split('-').reverse().join('/') : '—';
+  function formatWhatsapp(value) {
+    const digits = String(value || '').replace(/\D/g,'');
+    const national = digits.startsWith('55') && [12,13].includes(digits.length) ? digits.slice(2) : digits;
+    const prefix = national !== digits ? '+55 ' : '';
+    if (national.length === 11) return prefix + national.replace(/^(\d{2})(\d{5})(\d{4})$/, '($1) $2-$3');
+    if (national.length === 10) return prefix + national.replace(/^(\d{2})(\d{4})(\d{4})$/, '($1) $2-$3');
+    return digits;
+  }
+  async function loadClientsPage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando clientes…</div>';
+    try {
+      clients = await api('listClients');
+      if (activePage === 'clients') renderClients();
+    } catch (error) {
+      if (activePage === 'clients') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+    }
+  }
+  function clientRows(filter = '') {
+    const query = filter.trim().toLocaleLowerCase('pt-BR');
+    const digits = query.replace(/\D/g,'');
+    const visible = clients.filter(item => `${item.nome} ${item.email} ${formatWhatsapp(item.whatsapp)} ${displayClientDate(item.data_cadastro)}`.toLocaleLowerCase('pt-BR').includes(query) || (digits.length >= 3 && /^[+\d() .-]+$/.test(query) && item.whatsapp.includes(digits)));
+    if (!visible.length) return '<div class="empty">Nenhum cliente encontrado.</div>';
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Cliente</th><th>E-mail</th><th>WhatsApp</th><th>Data de cadastro</th><th>Ações</th></tr></thead><tbody>${visible.map(item => `<tr>
+      <td><span class="user-cell">${avatarMarkup(item)}<b>${escapeHtml(item.nome)}</b></span></td>
+      <td>${escapeHtml(item.email)}</td><td>${escapeHtml(formatWhatsapp(item.whatsapp))}</td><td>${escapeHtml(displayClientDate(item.data_cadastro))}</td>
+      <td><div class="row-actions"><button class="tiny-button" type="button" data-client-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-client-delete="${escapeHtml(item.id)}">Excluir</button></div></td>
+    </tr>`).join('')}</tbody></table></div>`;
+  }
+  function renderClients() {
+    const current = clients.find(item => item.id === editingClientId);
+    workspace.innerHTML = `<div class="users-tabs" role="tablist" aria-label="Cadastro de clientes">
+      <button class="users-tab ${clientsTab === 'editor' ? 'active' : ''}" type="button" role="tab" data-clients-tab="editor" aria-selected="${clientsTab === 'editor'}">Cadastro / edição</button>
+      <button class="users-tab ${clientsTab === 'list' ? 'active' : ''}" type="button" role="tab" data-clients-tab="list" aria-selected="${clientsTab === 'list'}">Clientes cadastrados <span>${clients.length}</span></button></div>
+      <section class="content-card users-tab-panel" data-clients-panel="editor" ${clientsTab === 'editor' ? '' : 'hidden'}>
+        <div class="card-head"><div><h2>${current ? 'Editar cliente' : 'Cadastrar cliente'}</h2><p>Preencha os dados do cliente para manter o cadastro atualizado.</p></div></div>
+        <form id="client-form" class="editor">
+          <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
+          <input type="hidden" name="expected_updated_at" value="${escapeHtml(current?.atualizado_em || '')}">
+          <div class="field"><label for="client-name">Nome completo</label><input id="client-name" name="nome" maxlength="180" minlength="2" autocomplete="name" value="${escapeHtml(current?.nome || '')}" required></div>
+          <div class="field"><label for="client-email">E-mail</label><input id="client-email" name="email" type="email" maxlength="254" autocomplete="email" value="${escapeHtml(current?.email || '')}" required></div>
+          <div class="field"><label for="client-whatsapp">WhatsApp</label><input id="client-whatsapp" name="whatsapp" type="tel" maxlength="24" autocomplete="tel" placeholder="(11) 99999-9999" value="${escapeHtml(formatWhatsapp(current?.whatsapp || ''))}" required><small class="helper">Informe o DDD. Para números internacionais, inclua o código do país.</small></div>
+          <div class="field"><label for="client-date">Data de cadastro</label><input id="client-date" name="data_cadastro" type="date" value="${escapeHtml(current?.data_cadastro || todayInBrazil())}" required></div>
+          <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar cliente</button></div>
+        </form></section>
+      <section class="content-card users-tab-panel" data-clients-panel="list" ${clientsTab === 'list' ? '' : 'hidden'}>
+        <div class="card-head"><div><h2>Clientes cadastrados</h2><p>${clients.length} registros disponíveis</p></div><div class="toolbar"><input id="clients-search" aria-label="Buscar clientes" placeholder="Buscar clientes…"></div></div>
+        <div id="clients-table">${clientRows()}</div></section>`;
+    const form = document.querySelector('#client-form');
+    const search = document.querySelector('#clients-search');
+    workspace.querySelectorAll('[data-clients-tab]').forEach(button => button.addEventListener('click', () => {
+      clientsTab = button.dataset.clientsTab;
+      workspace.querySelectorAll('[data-clients-tab]').forEach(tab => { const active = tab.dataset.clientsTab === clientsTab; tab.classList.toggle('active',active); tab.setAttribute('aria-selected',String(active)); });
+      workspace.querySelectorAll('[data-clients-panel]').forEach(panel => panel.hidden = panel.dataset.clientsPanel !== clientsTab);
+      if (clientsTab === 'list') search.focus();
+    }));
+    form.elements.whatsapp.addEventListener('blur', event => {
+      if (/^[+\d() .-]+$/.test(event.target.value)) event.target.value = formatWhatsapp(event.target.value);
+    });
+    form.addEventListener('reset', event => { event.preventDefault(); editingClientId = ''; renderClients(); });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const button = form.querySelector('[type="submit"]'); button.disabled = true;
+      const record = Object.fromEntries(new FormData(form).entries());
+      try {
+        const saved = await api(record.id ? 'updateClient' : 'createClient', {record});
+        const index = clients.findIndex(item => item.id === saved.id);
+        if (index >= 0) clients[index] = saved; else clients.push(saved);
+        editingClientId = ''; clientsTab = 'list';
+        if (activePage === 'clients') renderClients();
+        toast('Cliente salvo com sucesso.');
+      } catch (error) { toast(error.message,true); }
+      finally { button.disabled = false; }
+    });
+    search.addEventListener('input', () => { document.querySelector('#clients-table').innerHTML = clientRows(search.value); bindClientActions(); });
+    bindClientActions();
+  }
+  function bindClientActions() {
+    workspace.querySelectorAll('[data-client-edit]').forEach(button => button.addEventListener('click', () => {
+      editingClientId = button.dataset.clientEdit; clientsTab = 'editor'; renderClients();
+      workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});
+    }));
+    workspace.querySelectorAll('[data-client-delete]').forEach(button => button.addEventListener('click', async () => {
+      const selected = clients.find(item => item.id === button.dataset.clientDelete);
+      if (!selected || !confirm(`Excluir o cliente ${selected.nome}?`)) return;
+      button.disabled = true;
+      try {
+        await api('deleteClient', {id:selected.id,version:selected.atualizado_em});
+        clients = clients.filter(item => item.id !== selected.id);
+        if (editingClientId === selected.id) editingClientId = '';
+        clientsTab = 'list';
+        if (activePage === 'clients') renderClients();
+        toast('Cliente excluído.');
+      } catch (error) { button.disabled = false; toast(error.message,true); }
+    }));
   }
 
   async function loadUsersPage() {
@@ -786,7 +905,7 @@
         try { users = await api('listUsers'); } catch (_) {}
       }
       await loadOwnPhoto();
-      const firstPage = ['dashboard','finance','users','settings'].find(canAccess);
+      const firstPage = ['dashboard','finance','users','clients','settings'].find(canAccess);
       if (firstPage) navigate(firstPage);
       else {
         document.querySelector('#page-title').textContent = 'Acesso restrito';

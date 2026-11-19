@@ -42,3 +42,5 @@ assert.equal(run('publicUser_(operator).access.users'),true);
 assert.equal(run(`getModuleAccess_(admin,'operator').version`),run('saved.version'));
 assert.equal(files.get(settingsId).getBlob().getDataAsString().includes('"usuario_id"'),true);
 console.log('PASS: CSV initialization/idempotence, defaults, permission persistence, immediate revocation, finance read/write/delete denial, user management guards, admin protection, optimistic concurrency, invalid grants.');
+
+module.exports = {run,files,props,context};

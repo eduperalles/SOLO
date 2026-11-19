@@ -228,3 +228,10 @@ dialog::backdrop { background: rgba(0,0,0,.65); backdrop-filter: blur(3px); }
 .picker-user:hover { background:#faf7f2; }
 .picker-user span { overflow-wrap:anywhere; }
 @media(max-width:600px) { .settings-content { padding:16px; } .picker-user { align-items:flex-start; flex-direction:column; } .access-modules { grid-template-columns:1fr; } }
+
+.sidebar nav #registrations-toggle { width:100%; }
+.nav-chevron { margin-left:auto; transition:transform .2s; }
+[aria-expanded="true"] .nav-chevron { transform:rotate(180deg); }
+.sidebar .nav-submenu { display:grid; gap:4px; padding:5px 0 4px 16px; }
+.sidebar .nav-submenu button { font-size:13px; }
+.sidebar { overflow-y:auto; }
