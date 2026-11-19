@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#151515">
+  <title>Acesso administrativo — SOLO</title>
+  <link rel="icon" href="icofont.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/admin.css">
+  <script src="assets/config.js"></script>
+  <script src="assets/login.js" defer></script>
+</head>
+<body>
+  <main class="login-shell">
+    <a class="login-brand" href="index.html"><img src="1.png" alt="SOLO Ateliê Artesanal"></a>
+    <section class="login-card">
+      <p class="eyebrow">Área restrita</p>
+      <h1>Acesse o painel</h1>
+      <p class="muted">Entre com sua conta administrativa do SOLO.</p>
+      <form id="login-form">
+        <label for="email">E-mail</label>
+        <input id="email" name="email" type="email" autocomplete="username" required>
+        <label for="password">Senha</label>
+        <div class="password-field">
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button class="password-toggle" type="button" data-password-toggle aria-label="Mostrar senha">◉</button>
+        </div>
+        <p class="notice" id="notice" role="status" aria-live="polite"></p>
+        <button class="button" type="submit"><span>Entrar</span><span class="spinner" aria-hidden="true"></span></button>
+      </form>
+      <a class="back-link" href="index.html">← Voltar ao site</a>
+    </section>
+    <p class="login-foot">SOLO Ateliê Artesanal · Painel administrativo</p>
+  </main>
+</body>
+</html>

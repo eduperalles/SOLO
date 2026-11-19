@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#151515">
+  <title>Painel administrativo — SOLO</title>
+  <link rel="icon" href="../icofont.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/admin.css">
+  <script src="../assets/config.js"></script>
+  <script src="../assets/panel.js" defer></script>
+</head>
+<body class="panel-body">
+  <aside class="sidebar" id="sidebar">
+    <a class="sidebar-brand" href="../index.html"><img src="../1.png" alt="SOLO Ateliê Artesanal"></a>
+    <p class="side-label">Espaço de trabalho</p>
+    <nav>
+      <button class="active" data-page="dashboard">◈ <span>Visão geral</span></button>
+      <button data-page="users">♙ <span>Usuários</span></button>
+    </nav>
+    <div class="side-bottom">
+      <button type="button" data-logout>↪ <span>Sair do sistema</span></button>
+      <small>Dados sincronizados com o Google Drive</small>
+    </div>
+  </aside>
+  <main class="panel-main">
+    <header class="topbar">
+      <button class="mobile-menu" id="mobile-menu" type="button" aria-label="Abrir menu">☰</button>
+      <div><p class="eyebrow">SOLO / Administração</p><h1 id="page-title">Visão geral</h1></div>
+      <div class="user-menu">
+        <button class="account-trigger" id="open-profile" type="button">
+          <span class="avatar" id="user-avatar">S</span>
+          <span class="account-label"><b id="user-name">Carregando…</b><small>Alterar perfil</small></span>
+        </button>
+        <button class="logout" type="button" data-logout>Sair</button>
+      </div>
+    </header>
+    <section id="workspace" aria-live="polite"><div class="workspace-state">Validando sessão segura…</div></section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
