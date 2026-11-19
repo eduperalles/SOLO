@@ -5,6 +5,11 @@
   const toastNode = document.querySelector('#toast');
   let user = JSON.parse(sessionStorage.getItem('solo_user') || 'null');
   let users = [];
+  let selectedAccess = null;
+  const canAccess = page => user?.access?.[page] === true;
+  function paintAccess() {
+    document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
+  }
   let activePage = 'dashboard';
   let editingId = '';
   let usersTab = 'editor';
@@ -40,6 +45,8 @@
     const titles = {
       validateSession:'Validando acesso',
       listUsers:'Carregando usuários',
+      getModuleAccess:'Carregando permissões',
+      saveModuleAccess:'Salvando permissões',
       listFinanceReceivables:'Carregando contas a receber',
       listFinancePayables:'Carregando contas a pagar'
     };
@@ -88,15 +95,23 @@
     return profilePhoto;
   }
 
-  function navigate(page) {
-    if (page === 'users' && user?.perfil !== 'admin') return;
+  let navigationVersion = 0;
+  async function navigate(page) {
+    const version = ++navigationVersion;
+    try { user = await api('validateSession'); paintAccess(); } catch (error) { toast(error.message, true); return; }
+    if (version !== navigationVersion) return;
+    if (!canAccess(page)) {
+      workspace.innerHTML = '<div class="workspace-state">Sem permissão para acessar este módulo.</div>';
+      return;
+    }
     activePage = page;
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'finance' ? 'Financeiro' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') renderDashboard();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'finance') void loadFinancePage();
+    else if (page === 'settings') void loadSettingsPage();
   }
   document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.page)));
 
@@ -110,13 +125,89 @@
       </section>
       <div class="stats">
         <div class="stat"><span>Usuários cadastrados</span><strong>${userCount}</strong></div>
-        <div class="stat"><span>Módulos ativos</span><strong>${admin ? 2 : 1}</strong></div>
+        <div class="stat"><span>Módulos ativos</span><strong>${Object.values(user?.access || {}).filter(Boolean).length}</strong></div>
         <div class="stat"><span>Próxima etapa</span><strong style="font-size:18px">Em definição</strong></div>
       </div>
       <section class="content-card">
         <div class="card-head"><div><h2>Visão inicial</h2><p>Usuários e financeiro estão disponíveis.</p></div></div>
         <div class="empty">Use o menu lateral para cadastrar acessos ou organizar contas a receber e contas a pagar.</div>
       </section>`;
+  }
+
+  const searchIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>';
+  async function loadSettingsPage() {
+    selectedAccess = null;
+    workspace.innerHTML = '<div class="workspace-state">Carregando configurações…</div>';
+    try {
+      users = await api('listUsers');
+      if (activePage !== 'settings') return;
+      workspace.innerHTML = `<section class="content-card">
+        <div class="card-head"><div><h2>Acessos por usuário</h2><p>Selecione um usuário pela lupa e defina os módulos disponíveis.</p></div></div>
+        <div class="settings-content"><div class="field"><label for="access-user">Usuário selecionado</label>
+          <div class="settings-selector"><input id="access-user" value="" placeholder="Selecione um usuário" readonly><button class="button" id="find-access-user" type="button" aria-label="Buscar usuário">${searchIcon}</button></div></div>
+          <div id="access-editor" class="empty">Clique na lupa para escolher um usuário.</div>
+        </div></section>`;
+      document.querySelector('#find-access-user').addEventListener('click', openUserPicker);
+    } catch (error) { if (activePage === 'settings') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`; }
+  }
+  function openUserPicker() {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'user-picker';
+    dialog.setAttribute('aria-labelledby','picker-title');
+    dialog.innerHTML = `<div class="card-head"><h2 id="picker-title">Selecionar usuário</h2><button class="tiny-button" id="close-picker" type="button">Fechar</button></div>
+      <div class="field"><label for="access-search">Buscar por nome ou e-mail</label><input id="access-search" type="search" placeholder="Digite para buscar…"></div><div id="access-results" class="picker-results"></div>`;
+    document.body.append(dialog);
+    const search = dialog.querySelector('#access-search');
+    const results = dialog.querySelector('#access-results');
+    const render = () => {
+      const query = search.value.trim().toLocaleLowerCase('pt-BR');
+      const found = users.filter(item => `${item.nome} ${item.email}`.toLocaleLowerCase('pt-BR').includes(query));
+      results.innerHTML = found.length ? found.map(item => `<button type="button" class="picker-user" data-access-user="${escapeHtml(item.id)}"><span><b>${escapeHtml(item.nome)}</b><small>${escapeHtml(item.email)}</small></span><span class="badge">${item.perfil === 'admin' ? 'Administrador' : 'Operador'} · ${item.status === 'ativo' ? 'Ativo' : 'Inativo'}</span></button>`).join('') : '<div class="empty">Nenhum usuário encontrado.</div>';
+    };
+    search.addEventListener('input', render);
+    results.addEventListener('click', async event => {
+      const button = event.target.closest('[data-access-user]');
+      if (!button) return;
+      dialog.close();
+      const editor = document.querySelector('#access-editor');
+      selectedAccess = null;
+      document.querySelector('#access-user').value = '';
+      editor.innerHTML = '<div class="empty">Carregando acessos…</div>';
+      try {
+        const result = await api('getModuleAccess', {id:button.dataset.accessUser});
+        if (activePage !== 'settings' || !editor.isConnected) return;
+        selectedAccess = result;
+        document.querySelector('#access-user').value = `${result.user.nome} — ${result.user.email}`;
+        renderAccessEditor();
+      } catch (error) { if (editor.isConnected) editor.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`; }
+    });
+    dialog.querySelector('#close-picker').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove(), {once:true});
+    render(); dialog.showModal(); search.focus();
+  }
+  function renderAccessEditor() {
+    const current = selectedAccess;
+    const admin = current.user.perfil === 'admin';
+    const editor = document.querySelector('#access-editor');
+    editor.className = '';
+    editor.innerHTML = `<form id="access-form"><p class="helper">${admin ? 'Administradores possuem acesso integral a todos os módulos.' : 'Marque os módulos autorizados. As alterações valem na próxima consulta ao sistema.'}</p>
+      <div class="access-modules">${current.modules.map(module => `<label class="access-module"><input type="checkbox" name="${escapeHtml(module.id)}" ${current.access[module.id] ? 'checked' : ''} ${admin || module.adminOnly ? 'disabled' : ''}><span><b>${escapeHtml(module.name)}</b><small>${module.adminOnly ? 'Exclusivo dos administradores' : module.id === 'users' ? 'Cadastro de operadores; administradores só podem ser alterados por administradores' : 'Acesso ao módulo'}</small></span></label>`).join('')}</div>
+      <p id="access-message" role="status"></p><div class="form-actions"><button class="button" type="submit" ${admin ? 'disabled' : ''}>Salvar permissões</button></div></form>`;
+    editor.querySelector('form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = form.querySelector('[type="submit"]');
+      const message = editor.querySelector('#access-message');
+      button.disabled = true;
+      try {
+        const access = Object.fromEntries(['dashboard','users','finance'].map(key => [key,form.elements[key].checked]));
+        const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
+        current.access = saved.access; current.version = saved.version;
+        message.textContent = 'Permissões salvas com sucesso.';
+        toast('Permissões salvas com sucesso.');
+      } catch (error) { message.textContent = error.message; toast(error.message, true); }
+      finally { button.disabled = false; }
+    });
   }
 
   async function loadUsersPage() {
@@ -151,12 +242,12 @@
         <button class="users-tab ${usersTab === 'list' ? 'active' : ''}" type="button" role="tab" data-users-tab="list" aria-selected="${usersTab === 'list'}">Usuários cadastrados <span>${users.length}</span></button>
       </div>
       <section class="content-card users-tab-panel" data-users-panel="editor" ${usersTab === 'editor' ? '' : 'hidden'}>
-        <div class="card-head"><div><h2>${current ? 'Editar usuário' : 'Cadastrar usuário'}</h2><p>Somente administradores podem criar ou alterar acessos.</p></div></div>
+        <div class="card-head"><div><h2>${current ? 'Editar usuário' : 'Cadastrar usuário'}</h2><p>Gerencie os cadastros permitidos para seu acesso.</p></div></div>
         <form id="user-form" class="editor">
           <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
           <div class="field"><label for="user-form-name">Nome completo</label><input id="user-form-name" name="nome" maxlength="180" value="${escapeHtml(current?.nome || '')}" required></div>
           <div class="field"><label for="user-form-email">E-mail</label><input id="user-form-email" name="email" type="email" maxlength="254" value="${escapeHtml(current?.email || '')}" required></div>
-          <div class="field"><label for="user-form-role">Perfil</label><select id="user-form-role" name="perfil" required><option value="operador" ${current?.perfil !== 'admin' ? 'selected' : ''}>Operador</option><option value="admin" ${current?.perfil === 'admin' ? 'selected' : ''}>Administrador</option></select></div>
+          <div class="field"><label for="user-form-role">Perfil</label><select id="user-form-role" name="perfil" required><option value="operador" ${current?.perfil !== 'admin' ? 'selected' : ''}>Operador</option><option value="admin" ${user.perfil !== 'admin' ? 'disabled' : ''} ${current?.perfil === 'admin' ? 'selected' : ''}>Administrador</option></select></div>
           <div class="field"><label for="user-form-status">Status</label><select id="user-form-status" name="status" required><option value="ativo" ${current?.status !== 'inativo' ? 'selected' : ''}>Ativo</option><option value="inativo" ${current?.status === 'inativo' ? 'selected' : ''}>Inativo</option></select></div>
           <div class="field full"><label for="user-form-password">${current ? 'Nova senha (opcional)' : 'Senha'}</label><div class="password-field"><input id="user-form-password" name="senha" type="password" minlength="4" maxlength="12" autocomplete="new-password" ${current ? '' : 'required'}><button class="password-toggle" type="button" data-password-toggle aria-label="Mostrar senha">◉</button></div><small class="helper">Entre 4 e 12 caracteres.</small></div>
           <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar usuário</button></div>
@@ -645,8 +736,8 @@
         profilePhoto = record.foto_data_url || (removePhoto ? '' : profilePhoto);
         paintIdentity();
         dialog.close();
-        renderDashboard();
-        if (activePage === 'users') renderUsers();
+        paintAccess();
+        void navigate(activePage);
         toast('Perfil atualizado com sucesso.');
       } catch (error) {
         message.textContent = error.message;
@@ -690,12 +781,17 @@
       user = await api('validateSession');
       sessionStorage.setItem('solo_user', JSON.stringify(user));
       paintIdentity();
-      if (user.perfil !== 'admin') document.querySelector('[data-page="users"]').hidden = true;
+      paintAccess();
       if (user.perfil === 'admin') {
         try { users = await api('listUsers'); } catch (_) {}
       }
       await loadOwnPhoto();
-      renderDashboard();
+      const firstPage = ['dashboard','finance','users','settings'].find(canAccess);
+      if (firstPage) navigate(firstPage);
+      else {
+        document.querySelector('#page-title').textContent = 'Acesso restrito';
+        workspace.innerHTML = '<div class="workspace-state">Nenhum módulo liberado. Solicite acesso ao administrador. Seu perfil continua disponível no canto superior.</div>';
+      }
     } catch (_) {
       clearSession();
     }

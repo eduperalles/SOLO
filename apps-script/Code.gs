@@ -1,12 +1,14 @@
 const DRIVE_FOLDER_ID_ = '1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva';
 const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status','foto_arquivo_id','foto_atualizada_em','criado_em','atualizado_em'];
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em'];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:1,settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -26,7 +28,9 @@ function dispatch_(request) {
     case 'login': return login_(request);
     case 'logout': return logout_(request);
     case 'validateSession': return publicUser_(actor);
-    case 'listUsers': admin_(actor); return readUsers_().map(adminUser_);
+    case 'getModuleAccess': return getModuleAccess_(actor, request.id);
+    case 'saveModuleAccess': return saveModuleAccess_(actor, request);
+    case 'listUsers': module_(actor, 'users'); return readUsers_().map(adminUser_);
     case 'getUserPhotos': return getUserPhotos_(actor, request.ids);
     case 'createUser': return saveUser_(actor, request.record || {}, 'create');
     case 'updateUser': return saveUser_(actor, request.record || {}, 'update');
@@ -55,6 +59,7 @@ function setupSolo() {
   const photoFolder = photos.hasNext() ? photos.next() : folder.createFolder('fotos-perfil');
   props.setProperty('PHOTO_FOLDER_ID', photoFolder.getId());
   setupFinanceFiles_(folder, props);
+  setupSettings();
 
   const email = normalizeEmail_(props.getProperty('INITIAL_ADMIN_EMAIL'));
   const password = String(props.getProperty('INITIAL_ADMIN_PASSWORD') || '');
@@ -83,6 +88,65 @@ function setupSolo() {
   });
   props.deleteProperty('INITIAL_ADMIN_PASSWORD');
   return 'SOLO configurado; usuários, fotos e os dois CSVs financeiros estão na pasta do Drive.';
+}
+
+function setupSettings() {
+  return withLock_(() => {
+    const props = PropertiesService.getScriptProperties();
+    const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+    const files = folder.getFilesByName('configuracoes.csv');
+    const file = files.hasNext() ? files.next() : folder.createFile('configuracoes.csv', csv_(ACCESS_COLUMNS_, []), 'text/csv');
+    props.setProperty('SETTINGS_FILE_ID', file.getId());
+    return 'Configurações SOLO prontas; configuracoes.csv preservado na pasta do projeto.';
+  });
+}
+
+function readAccess_() {
+  const id = PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID');
+  if (!id) throw Error('Configurações não inicializadas. Execute setupSettings.');
+  const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (ACCESS_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
+}
+
+function access_(user, rows) {
+  if (user.perfil === 'admin') return {dashboard:true,users:true,finance:true,settings:true};
+  const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
+  // Preserva o acesso anterior até o administrador configurar o usuário.
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,finance:row ? row.finance === '1' : true,settings:false};
+}
+
+function module_(actor, module) {
+  if (!actor || !access_(actor)[module]) throw Error('Sem permissão para acessar este módulo.');
+}
+
+function getModuleAccess_(actor, id) {
+  admin_(actor);
+  const selected = readUsers_().find(row => row.id === String(id || ''));
+  if (!selected) throw Error('Usuário não encontrado.');
+  const rows = readAccess_();
+  const row = rows.find(row => row.usuario_id === selected.id);
+  return {user:publicUser_(selected),modules:MODULES_,access:access_(selected, rows),version:row ? row.atualizado_em : ''};
+}
+
+function saveModuleAccess_(actor, request) {
+  admin_(actor);
+  return withLock_(() => {
+    const selected = readUsers_().find(row => row.id === String(request.id || ''));
+    if (!selected) throw Error('Usuário não encontrado.');
+    if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
+    const input = request.access;
+    if (!input || Object.keys(input).sort().join(',') !== 'dashboard,finance,users' || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    const rows = readAccess_();
+    const index = rows.findIndex(row => row.usuario_id === selected.id);
+    if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
+    const next = {usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    if (index < 0) rows.push(next); else rows[index] = next;
+    DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
+    return {access:access_(selected, rows),version:next.atualizado_em};
+  });
 }
 
 function setupFinanceFiles_(folder, props) {
@@ -121,12 +185,12 @@ function saveFinanceRows_(type, rows) {
 }
 
 function listFinance_(actor, type) {
-  if (!actor) throw Error('Sessão inválida. Entre novamente.');
+  module_(actor, 'finance');
   return readFinance_(type).map(record => ({...record, valor:Number(record.valor) || 0}));
 }
 
 function saveFinance_(actor, type, input) {
-  if (!actor) throw Error('Sessão inválida. Entre novamente.');
+  module_(actor, 'finance');
   const id = String(input.id || '');
   const descricao = String(input.descricao || '').trim();
   const pessoa = String(input.pessoa || '').trim();
@@ -169,7 +233,7 @@ function saveFinance_(actor, type, input) {
 }
 
 function deleteFinance_(actor, type, id) {
-  if (!actor) throw Error('Sessão inválida. Entre novamente.');
+  module_(actor, 'finance');
   return withLock_(() => {
     const rows = readFinance_(type);
     const selected = rows.find(row => row.id === String(id));
@@ -225,13 +289,15 @@ function admin_(actor) {
 }
 
 function saveUser_(actor, input, operation) {
-  admin_(actor);
+  module_(actor, 'users');
   return withLock_(() => {
     const rows = readUsers_();
     const id = String(input.id || '');
     const old = operation === 'update' ? rows.find(row => row.id === id) : null;
     if (operation === 'update' && !old) throw Error('Usuário não encontrado.');
     const clean = validateUser_(input, rows, id);
+    if (actor.perfil !== 'admin' && (clean.perfil !== 'operador' || old && old.perfil === 'admin')) throw Error('Somente administradores podem gerenciar administradores.');
+    if (old && old.perfil === 'admin' && old.status === 'ativo' && (clean.perfil !== 'admin' || clean.status !== 'ativo') && rows.filter(row => row.perfil === 'admin' && row.status === 'ativo').length <= 1) throw Error('Mantenha ao menos um administrador ativo.');
     if (operation === 'create') {
       const salt = random_();
       const user = {
@@ -264,11 +330,12 @@ function saveUser_(actor, input, operation) {
 }
 
 function deleteUser_(actor, id) {
-  admin_(actor);
+  module_(actor, 'users');
   return withLock_(() => {
     const rows = readUsers_();
     const old = rows.find(row => row.id === String(id));
     if (!old) throw Error('Usuário não encontrado.');
+    if (actor.perfil !== 'admin' && old.perfil === 'admin') throw Error('Somente administradores podem gerenciar administradores.');
     if (old.id === actor.id) throw Error('Não é possível excluir o usuário atual.');
     if (rows.filter(row => row.perfil === 'admin' && row.status === 'ativo').length === 1 && old.perfil === 'admin' && old.status === 'ativo') {
       throw Error('Mantenha ao menos um administrador ativo.');
@@ -402,7 +469,7 @@ function csv_(headers, rows) {
 }
 
 function publicUser_(user) {
-  return {id:user.id,nome:user.nome,email:user.email,perfil:user.perfil,status:user.status,has_photo:!!user.foto_arquivo_id,photo_version:user.foto_atualizada_em || '',atualizado_em:user.atualizado_em};
+  return {id:user.id,nome:user.nome,email:user.email,perfil:user.perfil,status:user.status,access:access_(user),has_photo:!!user.foto_arquivo_id,photo_version:user.foto_atualizada_em || '',atualizado_em:user.atualizado_em};
 }
 
 function adminUser_(user) {
@@ -410,7 +477,7 @@ function adminUser_(user) {
 }
 
 function getUserPhotos_(actor, rawIds) {
-  admin_(actor);
+  module_(actor, 'users');
   const ids = [...new Set((Array.isArray(rawIds) ? rawIds : []).map(id => String(id || '').trim()).filter(Boolean))].slice(0, 50);
   const photos = {};
   if (!ids.length) return {photos};

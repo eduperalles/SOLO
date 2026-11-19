@@ -210,3 +210,21 @@ dialog::backdrop { background: rgba(0,0,0,.65); backdrop-filter: blur(3px); }
   .finance-table { min-width: 760px; }
   .login-card { padding: 28px 24px; }
 }
+
+/* Configurações e seleção de usuários */
+[hidden] { display:none !important; }
+.settings-content { padding:24px; }
+.settings-selector { display:flex; gap:10px; }
+.settings-selector input { min-width:0; flex:1; }
+.settings-selector button { display:grid; place-items:center; }
+.access-modules { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin:24px 0; }
+.access-module { display:flex; align-items:flex-start; gap:12px; border:1px solid var(--line); border-radius:10px; padding:18px; cursor:pointer; }
+.access-module input { width:18px; height:18px; flex:none; accent-color:#a37c40; margin-top:2px; }
+.access-module small,.picker-user small { display:block; margin-top:6px; color:var(--muted); line-height:1.6; }
+.user-picker { width:min(650px,calc(100% - 28px)); max-height:85vh; border:1px solid var(--line); border-radius:14px; padding:24px; }
+.user-picker::backdrop { background:#0008; }
+.picker-results { max-height:50vh; overflow:auto; margin-top:16px; }
+.picker-user { display:flex; width:100%; align-items:center; justify-content:space-between; gap:12px; text-align:left; background:white; border:0; border-bottom:1px solid var(--line); padding:16px 4px; cursor:pointer; font:inherit; }
+.picker-user:hover { background:#faf7f2; }
+.picker-user span { overflow-wrap:anywhere; }
+@media(max-width:600px) { .settings-content { padding:16px; } .picker-user { align-items:flex-start; flex-direction:column; } .access-modules { grid-template-columns:1fr; } }
