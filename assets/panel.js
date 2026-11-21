@@ -51,6 +51,16 @@
     return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toLocaleUpperCase('pt-BR');
   };
   const money = value => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(Number(value) || 0);
+  function parseCurrency(value) {
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits) return '';
+    return (Number(digits) / 100).toFixed(2);
+  }
+  function maskCurrency(value) {
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits) return '';
+    return new Intl.NumberFormat('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Number(digits) / 100);
+  }
   let dashboardData = { receivables: [], payables: [], clients: [], orders: [] };
   let dashFinanceYear = String(new Date().getFullYear());
   let dashFinanceType = 'all';
@@ -905,11 +915,42 @@
   }
 
   function calcProfitMargin(costVal, priceVal) {
-    const cost = Math.max(0, Number(String(costVal ?? '0').replace(',', '.')) || 0);
-    const price = Math.max(0, Number(String(priceVal ?? '0').replace(',', '.')) || 0);
+    const cost = Number(parseCurrency(costVal)) || 0;
+    const price = Number(parseCurrency(priceVal)) || 0;
     const profit = price - cost;
     const margin = price > 0 ? (profit / price) * 100 : 0;
     return { cost, price, profit, margin };
+  }
+
+  function openSupplierPicker() {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'user-picker';
+    dialog.setAttribute('aria-labelledby','supplier-picker-title');
+    dialog.innerHTML = `<div class="card-head"><h2 id="supplier-picker-title">Selecionar fornecedor</h2><button class="tiny-button" id="close-supplier-picker" type="button">Fechar</button></div>
+      <div class="field"><label for="supplier-picker-search">Buscar por fornecedor, e-mail ou produto</label><input id="supplier-picker-search" type="search" placeholder="Digite para buscar…"></div><div id="supplier-picker-results" class="picker-results"></div>`;
+    document.body.append(dialog);
+    const search = dialog.querySelector('#supplier-picker-search');
+    const results = dialog.querySelector('#supplier-picker-results');
+    const render = () => {
+      const query = search.value.trim().toLocaleLowerCase('pt-BR');
+      const found = suppliers.filter(item => `${item.fornecedor} ${item.email} ${item.tipo_produto} ${item.cidade}`.toLocaleLowerCase('pt-BR').includes(query));
+      results.innerHTML = found.length ? found.map(item => `<button type="button" class="picker-user" data-picker-supplier="${escapeHtml(item.id)}"><span><b>${escapeHtml(item.fornecedor)}</b><small>${escapeHtml(item.email || 'Sem e-mail')}${item.cidade ? ` · ${escapeHtml(item.cidade)}/${escapeHtml(item.uf)}` : ''}</small></span><span class="badge">${escapeHtml(item.tipo_produto || 'Fornecedor')}</span></button>`).join('') : '<div class="empty">Nenhum fornecedor encontrado.</div>';
+    };
+    search.addEventListener('input', render);
+    results.addEventListener('click', event => {
+      const button = event.target.closest('[data-picker-supplier]');
+      if (!button) return;
+      dialog.close();
+      const selected = suppliers.find(s => s.id === button.dataset.pickerSupplier);
+      if (!selected) return;
+      const nameInput = document.querySelector('#prod-fornecedor-nome');
+      const idInput = document.querySelector('#prod-fornecedor-id');
+      if (nameInput) nameInput.value = selected.fornecedor;
+      if (idInput) idInput.value = selected.id;
+    });
+    dialog.querySelector('#close-supplier-picker').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove(), {once:true});
+    render(); dialog.showModal(); search.focus();
   }
 
   async function loadProductsPage() {
@@ -974,10 +1015,12 @@
         <div class="field full"><label for="prod-nome">Nome do produto *</label><input id="prod-nome" name="nome" maxlength="180" minlength="2" value="${escapeHtml(current?.nome || '')}" placeholder="Ex: Tábua Brie com Favo de Mel" required></div>
         
         <div class="field"><label for="prod-categoria">Categoria</label><input id="prod-categoria" name="categoria" maxlength="100" value="${escapeHtml(current?.categoria || 'Geral')}" placeholder="Ex: Queijos, Frios, Cestas, Vinhos"></div>
-        <div class="field"><label for="prod-fornecedor">Fornecedor vinculado *</label><select id="prod-fornecedor" name="fornecedor_id" required><option value="">Selecione o fornecedor</option>${suppliers.map(s => `<option value="${escapeHtml(s.id)}" ${current?.fornecedor_id === s.id ? 'selected' : ''}>${escapeHtml(s.fornecedor)}</option>`).join('')}</select></div>
+        <div class="field"><label for="prod-fornecedor-nome">Fornecedor vinculado *</label>
+          <div class="settings-selector"><input id="prod-fornecedor-nome" name="fornecedor_nome" value="${escapeHtml(current?.fornecedor_nome || '')}" placeholder="Clique na lupa para selecionar" readonly required><input type="hidden" id="prod-fornecedor-id" name="fornecedor_id" value="${escapeHtml(current?.fornecedor_id || '')}" required><button class="button" id="find-prod-supplier" type="button" aria-label="Buscar fornecedor">${searchIcon}</button></div>
+        </div>
 
-        <div class="field"><label for="prod-custo">Preço de Custo (R$) *</label><input id="prod-custo" name="preco_custo" type="text" inputmode="decimal" value="${current ? String(current.preco_custo).replace('.', ',') : '0,00'}" placeholder="0,00" required><small class="helper">Valor pago ao fornecedor pelo produto ou insumo.</small></div>
-        <div class="field"><label for="prod-venda">Preço de Venda (R$) *</label><input id="prod-venda" name="preco_venda" type="text" inputmode="decimal" value="${current ? String(current.preco_venda).replace('.', ',') : '0,00'}" placeholder="0,00" required><small class="helper">Preço de venda cobrado do cliente final.</small></div>
+        <div class="field"><label for="prod-custo">Preço de Custo (R$) *</label><input id="prod-custo" name="preco_custo" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.preco_custo)*100) : '')}" placeholder="0,00" required><small class="helper">Valor pago ao fornecedor pelo produto ou insumo.</small></div>
+        <div class="field"><label for="prod-venda">Preço de Venda (R$) *</label><input id="prod-venda" name="preco_venda" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.preco_venda)*100) : '')}" placeholder="0,00" required><small class="helper">Preço de venda cobrado do cliente final.</small></div>
 
         <!-- CÁLCULO AUTOMÁTICO DE MARGEM -->
         <div class="field full">
@@ -1053,16 +1096,16 @@
         marginEl.parentElement.className = `dash-metric-pill ${calc.margin >= 30 ? 'success' : calc.margin > 0 ? 'gold' : 'danger'}`;
       }
     };
-    costInput?.addEventListener('input', updateMarginPreview);
-    priceInput?.addEventListener('input', updateMarginPreview);
-
-    // Seleção de fornecedor atualiza o nome oculto
-    const supplierSelect = document.querySelector('#prod-fornecedor');
-    supplierSelect?.addEventListener('change', () => {
-      const opt = supplierSelect.selectedOptions[0];
-      const nameInput = document.querySelector('#prod-fornecedor-nome');
-      if (nameInput) nameInput.value = opt ? opt.textContent : '';
+    costInput?.addEventListener('input', event => {
+      event.target.value = maskCurrency(event.target.value);
+      updateMarginPreview();
     });
+    priceInput?.addEventListener('input', event => {
+      event.target.value = maskCurrency(event.target.value);
+      updateMarginPreview();
+    });
+
+    document.querySelector('#find-prod-supplier')?.addEventListener('click', openSupplierPicker);
 
     // Upload de foto do produto
     const photoUploadBtn = document.querySelector('#btn-prod-photo-upload');
@@ -1106,16 +1149,15 @@
       const submitBtn = form.querySelector('[type="submit"]');
       submitBtn.disabled = true;
       const fd = new FormData(form);
-      const supplierOpt = supplierSelect?.selectedOptions[0];
       const record = {
         id: fd.get('id') || '',
         expected_updated_at: fd.get('expected_updated_at') || '',
         nome: fd.get('nome'),
         categoria: fd.get('categoria'),
         fornecedor_id: fd.get('fornecedor_id'),
-        fornecedor_nome: supplierOpt ? supplierOpt.textContent : '',
-        preco_custo: fd.get('preco_custo'),
-        preco_venda: fd.get('preco_venda'),
+        fornecedor_nome: fd.get('fornecedor_nome'),
+        preco_custo: parseCurrency(fd.get('preco_custo')),
+        preco_venda: parseCurrency(fd.get('preco_venda')),
         descricao: fd.get('descricao'),
         status: fd.get('status') === 'on' ? 'ativo' : 'inativo'
       };
@@ -1640,16 +1682,6 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '—';
     const [year, month, day] = value.split('-');
     return `${day}/${month}/${year}`;
-  }
-  function parseCurrency(value) {
-    const digits = String(value ?? '').replace(/\D/g, '');
-    if (!digits) return '';
-    return (Number(digits) / 100).toFixed(2);
-  }
-  function maskCurrency(value) {
-    const digits = String(value ?? '').replace(/\D/g, '');
-    if (!digits) return '';
-    return new Intl.NumberFormat('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Number(digits) / 100);
   }
   function financeMonthOptions(selected = financeMonth) {
     const names = ['Todos os meses','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
