@@ -17,6 +17,7 @@
   let editingClientId = '';
   let editingSupplierId = '';
   let editingProductId = '';
+  let productPhoto = '';
   let editingCardId = '';
   let cardPhotos = [];
   let selectedAccess = null;
