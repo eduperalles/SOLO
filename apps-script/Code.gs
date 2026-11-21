@@ -3,16 +3,17 @@ const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em','cliente_id','pedido_id'];
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
 const SUPPLIER_COLUMNS_ = ['id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
+const PRODUCT_COLUMNS_ = ['id','nome','categoria','fornecedor_id','fornecedor_nome','preco_custo','preco_venda','margem_lucro','foto_arquivo_id','descricao','status','criado_em','atualizado_em'];
 const MENU_CONFIG_COLUMNS_ = ['id','menu_titulo','secao_titulo','secao_subtitulo','ativo','atualizado_em'];
 const MENU_CARD_COLUMNS_ = ['id','titulo','descricao','fotos_json','ordem','ativo','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','site_menu','orders','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','products','site_menu','orders','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'products',name:'Produtos'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -57,6 +58,10 @@ function dispatch_(request) {
     case 'createSupplier': return saveSupplier_(actor, request.record || {}, 'create');
     case 'updateSupplier': return saveSupplier_(actor, request.record || {}, 'update');
     case 'deleteSupplier': return deleteSupplier_(actor, request.id, request.version);
+    case 'listProducts': module_(actor, 'products'); return readProducts_();
+    case 'createProduct': return saveProduct_(actor, request.record || {}, 'create');
+    case 'updateProduct': return saveProduct_(actor, request.record || {}, 'update');
+    case 'deleteProduct': return deleteProduct_(actor, request.id, request.version);
     case 'getUserPhotos': return getUserPhotos_(actor, request.ids);
     case 'createUser': return saveUser_(actor, request.record || {}, 'create');
     case 'updateUser': return saveUser_(actor, request.record || {}, 'update');
@@ -134,15 +139,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','products','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,site_menu:true,orders:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,products:true,site_menu:true,orders:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',products:!!row && row.products === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -165,11 +170,11 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','products','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',products:input.products === undefined ? (index < 0 ? '0' : rows[index].products || '0') : input.products ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
@@ -337,6 +342,149 @@ function deleteSupplier_(actor, id, version) {
     if (String(version || '') !== selected.atualizado_em) throw Error('Fornecedor atualizado por outra sessão. Atualize a lista antes de excluir.');
     saveSupplierRows_(rows.filter(row => row.id !== selected.id));
     return {deleted:true};
+  });
+}
+
+function getProductsPhotosFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('PRODUCTS_PHOTOS_FOLDER_ID');
+  if (id) {
+    try {
+      return DriveApp.getFolderById(id);
+    } catch (_) {}
+  }
+  const root = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const folders = root.getFoldersByName('fotos-produtos');
+  const folder = folders.hasNext() ? folders.next() : root.createFolder('fotos-produtos');
+  try { folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) {}
+  props.setProperty('PRODUCTS_PHOTOS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function getProductsFile_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('PRODUCTS_FILE_ID');
+  if (id) {
+    try {
+      return DriveApp.getFileById(id);
+    } catch (_) {}
+  }
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const files = folder.getFilesByName('produtos.csv');
+  const file = files.hasNext() ? files.next() : folder.createFile('produtos.csv', csv_(PRODUCT_COLUMNS_, []), 'text/csv');
+  props.setProperty('PRODUCTS_FILE_ID', file.getId());
+  return file;
+}
+
+function readProducts_() {
+  const file = getProductsFile_();
+  const text = file.getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  if (!text.trim()) return [];
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (PRODUCT_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de produtos.csv inválido.');
+  return matrix.filter(r => r.some(Boolean)).map(r => {
+    const item = Object.fromEntries(headers.map((k, i) => [k, r[i] || '']));
+    item.foto_url = item.foto_arquivo_id ? 'https://drive.google.com/thumbnail?id=' + item.foto_arquivo_id + '&sz=w800' : '';
+    item.preco_custo = Number(item.preco_custo || 0);
+    item.preco_venda = Number(item.preco_venda || 0);
+    item.margem_lucro = Number(item.margem_lucro || 0);
+    return item;
+  });
+}
+
+function saveProductRows_(rows) {
+  const file = getProductsFile_();
+  file.setContent(csv_(PRODUCT_COLUMNS_, rows));
+}
+
+function saveProduct_(actor, input, operation) {
+  module_(actor, 'products');
+  const id = String(input.id || '');
+  const nome = String(input.nome || '').trim();
+  const categoria = String(input.categoria || 'Geral').trim();
+  const fornecedor_id = String(input.fornecedor_id || '').trim();
+  const fornecedor_nome = String(input.fornecedor_nome || '').trim();
+  const preco_custo = Number(String(input.preco_custo ?? '0').replace(',', '.'));
+  const preco_venda = Number(String(input.preco_venda ?? '0').replace(',', '.'));
+  const descricao = String(input.descricao || '').trim();
+  const status = input.status === 'inativo' || input.status === false || input.status === '0' ? 'inativo' : 'ativo';
+
+  if (nome.length < 2 || nome.length > 180) throw Error('Informe o nome do produto (2 a 180 caracteres).');
+  if (isNaN(preco_venda) || preco_venda <= 0) throw Error('O preço de venda deve ser maior que zero.');
+  if (isNaN(preco_custo) || preco_custo < 0) throw Error('O preço de custo não pode ser negativo.');
+  if (categoria.length > 100) throw Error('A categoria deve conter até 100 caracteres.');
+  if (descricao.length > 4000) throw Error('A descrição deve conter até 4.000 caracteres.');
+
+  const lucro = preco_venda - preco_custo;
+  const margem = preco_venda > 0 ? (lucro / preco_venda) * 100 : 0;
+  const margem_lucro = margem.toFixed(2);
+
+  return withLock_(() => {
+    const rows = readProducts_();
+    const index = operation === 'update' ? rows.findIndex(r => r.id === id) : -1;
+    const old = rows[index];
+    if (operation === 'update' && !old) throw Error('Produto não encontrado.');
+    if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Produto atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+
+    let foto_arquivo_id = old ? (old.foto_arquivo_id || '') : '';
+    if (input.foto_data_url) {
+      const decoded = decodePhoto_(input.foto_data_url);
+      const folder = getProductsPhotosFolder_();
+      const file = folder.createFile(Utilities.newBlob(decoded.bytes, decoded.mime, 'prod-' + Utilities.getUuid() + '.' + decoded.extension));
+      try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) {}
+      if (old && old.foto_arquivo_id) {
+        try { DriveApp.getFileById(old.foto_arquivo_id).setTrashed(true); } catch (_) {}
+      }
+      foto_arquivo_id = file.getId();
+    } else if (input.remove_photo === true) {
+      if (old && old.foto_arquivo_id) {
+        try { DriveApp.getFileById(old.foto_arquivo_id).setTrashed(true); } catch (_) {}
+      }
+      foto_arquivo_id = '';
+    }
+
+    const stamp = now_();
+    const record = {
+      id: old ? old.id : Utilities.getUuid(),
+      nome,
+      categoria,
+      fornecedor_id,
+      fornecedor_nome,
+      preco_custo: preco_custo.toFixed(2),
+      preco_venda: preco_venda.toFixed(2),
+      margem_lucro,
+      foto_arquivo_id,
+      descricao,
+      status,
+      criado_em: old ? old.criado_em : stamp,
+      atualizado_em: stamp
+    };
+
+    if (old) rows[index] = record; else rows.push(record);
+    saveProductRows_(rows);
+    record.foto_url = foto_arquivo_id ? 'https://drive.google.com/thumbnail?id=' + foto_arquivo_id + '&sz=w800' : '';
+    record.preco_custo = preco_custo;
+    record.preco_venda = preco_venda;
+    record.margem_lucro = Number(margem_lucro);
+    return record;
+  });
+}
+
+function deleteProduct_(actor, id, version) {
+  module_(actor, 'products');
+  return withLock_(() => {
+    const rows = readProducts_();
+    const selected = rows.find(r => r.id === String(id || ''));
+    if (!selected) throw Error('Produto não encontrado.');
+    if (String(version || '') !== selected.atualizado_em) throw Error('Produto atualizado por outra sessão. Atualize a lista antes de excluir.');
+
+    if (selected.foto_arquivo_id) {
+      try { DriveApp.getFileById(selected.foto_arquivo_id).setTrashed(true); } catch (_) {}
+    }
+
+    saveProductRows_(rows.filter(r => r.id !== selected.id));
+    return {deleted: true};
   });
 }
 

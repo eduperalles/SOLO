@@ -7,13 +7,16 @@
   let users = [];
   let clients = [];
   let suppliers = [];
+  let products = [];
   let siteMenuConfig = { menu_titulo: 'Eventos', secao_titulo: 'Eventos & Celebrações', secao_subtitulo: '', ativo: '1' };
   let siteCards = [];
   let clientsTab = 'editor';
   let suppliersTab = 'editor';
+  let productsTab = 'editor';
   let siteMenuTab = 'config';
   let editingClientId = '';
   let editingSupplierId = '';
+  let editingProductId = '';
   let editingCardId = '';
   let cardPhotos = [];
   let selectedAccess = null;
@@ -21,7 +24,7 @@
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
-    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('site_menu');
+    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('products') && !canAccess('site_menu');
   }
   let activePage = 'dashboard';
   let editingId = '';
@@ -67,6 +70,10 @@
       listUsers:'Carregando usuários',
       listClients:'Carregando clientes',
       listSuppliers:'Carregando fornecedores',
+      listProducts:'Carregando produtos',
+      createProduct:'Salvando produto',
+      updateProduct:'Salvando produto',
+      deleteProduct:'Excluindo produto',
       listOrders:'Carregando pedidos',
       retryOrder:'Concluindo gravação do pedido',
       deleteOrder:'Excluindo pedido',
@@ -146,18 +153,19 @@
       return;
     }
     activePage = page;
-    if (['users','clients','suppliers','site_menu'].includes(page)) {
+    if (['users','clients','suppliers','products','site_menu'].includes(page)) {
       document.querySelector('#registrations-items').hidden = false;
       document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
     }
-    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','site_menu'].includes(page));
+    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','products','site_menu'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'products' ? 'Produtos' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') void loadDashboardPage();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
     else if (page === 'suppliers') void loadSuppliersPage();
+    else if (page === 'products') void loadProductsPage();
     else if (page === 'site_menu') void loadSiteMenuPage();
     else if (page === 'orders') void loadOrdersPage();
     else if (page === 'finance') void loadFinancePage();
@@ -479,6 +487,18 @@
                 <td><code>SUPPLIERS_FILE_ID</code></td>
               </tr>
               <tr>
+                <td><b>produtos.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Cadastro de produtos amarrado a fornecedores, com preço de custo, preço de venda, cálculo de margem e fotos.</td>
+                <td><code>PRODUCTS_FILE_ID</code></td>
+              </tr>
+              <tr>
+                <td><b>fotos-produtos</b></td>
+                <td><span class="badge">Pasta</span></td>
+                <td>Pasta pública no Google Drive para armazenamento das fotos dos produtos do catálogo da SOLO.</td>
+                <td><code>PRODUCTS_PHOTOS_FOLDER_ID</code></td>
+              </tr>
+              <tr>
                 <td><b>menu_site_config.csv</b></td>
                 <td><span class="badge">CSV</span></td>
                 <td>Configurações do item de menu e seção dinâmica do site (título do menu, título da seção, subtítulo e status ativo).</td>
@@ -651,7 +671,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','clients','suppliers','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','suppliers','products','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -880,6 +900,280 @@
         if (activePage === 'suppliers') renderSuppliers();
         toast('Fornecedor excluído.');
       } catch (error) { button.disabled = false; toast(error.message,true); }
+    }));
+  }
+
+  function calcProfitMargin(costVal, priceVal) {
+    const cost = Math.max(0, Number(String(costVal ?? '0').replace(',', '.')) || 0);
+    const price = Math.max(0, Number(String(priceVal ?? '0').replace(',', '.')) || 0);
+    const profit = price - cost;
+    const margin = price > 0 ? (profit / price) * 100 : 0;
+    return { cost, price, profit, margin };
+  }
+
+  async function loadProductsPage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando produtos…</div>';
+    try {
+      const [prodRes, supRes] = await Promise.all([
+        api('listProducts').catch(() => []),
+        api('listSuppliers').catch(() => [])
+      ]);
+      if (activePage !== 'products') return;
+      products = prodRes || [];
+      suppliers = supRes || [];
+      renderProducts();
+    } catch (error) {
+      if (activePage === 'products') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function productRows(filter = '') {
+    const query = filter.trim().toLocaleLowerCase('pt-BR');
+    const visible = products.filter(p => `${p.nome} ${p.categoria} ${p.fornecedor_nome} ${p.descricao}`.toLocaleLowerCase('pt-BR').includes(query));
+    if (!visible.length) return '<div class="empty">Nenhum produto encontrado.</div>';
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Foto</th><th>Produto</th><th>Categoria</th><th>Fornecedor</th><th>Custo</th><th>Venda</th><th>Margem</th><th>Ações</th></tr></thead><tbody>${visible.map(p => {
+      const thumb = p.foto_url ? `<img src="${escapeHtml(p.foto_url)}" alt="" class="table-product-thumb" onerror="this.style.display='none'">` : '<div class="table-product-thumb" style="display:grid;place-items:center;color:var(--muted);font-size:18px;">🏷</div>';
+      const profit = p.preco_venda - p.preco_custo;
+      const marginBadgeClass = p.margem_lucro >= 30 ? '' : p.margem_lucro > 0 ? 'gold' : 'inactive';
+      return `<tr>
+        <td>${thumb}</td>
+        <td><b>${escapeHtml(p.nome)}</b>${p.descricao ? `<small class="order-contact" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.descricao)}</small>` : ''}</td>
+        <td><span class="badge">${escapeHtml(p.categoria || 'Geral')}</span></td>
+        <td>${escapeHtml(p.fornecedor_nome || '—')}</td>
+        <td>${money(p.preco_custo)}</td>
+        <td><b>${money(p.preco_venda)}</b></td>
+        <td><span class="badge ${marginBadgeClass}" title="Lucro: ${money(profit)}">${p.margem_lucro.toFixed(1)}% <small>(${money(profit)})</small></span></td>
+        <td><div class="row-actions"><button class="tiny-button" type="button" data-prod-edit="${escapeHtml(p.id)}">Editar</button><button class="tiny-button danger" type="button" data-prod-delete="${escapeHtml(p.id)}">Excluir</button></div></td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+
+  function renderProducts() {
+    const current = products.find(p => p.id === editingProductId);
+    const initialCost = current ? current.preco_custo : 0;
+    const initialPrice = current ? current.preco_venda : 0;
+    const initialCalc = calcProfitMargin(initialCost, initialPrice);
+    if (editingProductId && current && !productPhoto && current.foto_url) {
+      productPhoto = current.foto_url;
+    }
+
+    workspace.innerHTML = `<div class="users-tabs" role="tablist" aria-label="Cadastro de produtos">
+      <button class="users-tab ${productsTab === 'editor' ? 'active' : ''}" type="button" role="tab" data-prods-tab="editor" aria-selected="${productsTab === 'editor'}">Cadastro / edição</button>
+      <button class="users-tab ${productsTab === 'list' ? 'active' : ''}" type="button" role="tab" data-prods-tab="list" aria-selected="${productsTab === 'list'}">Produtos cadastrados <span>${products.length}</span></button>
+    </div>
+
+    <!-- PAINEL 1: CADASTRO / EDIÇÃO -->
+    <section class="content-card users-tab-panel" data-prods-panel="editor" ${productsTab === 'editor' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>${current ? 'Editar produto' : 'Cadastrar produto'}</h2><p>Preencha os dados do produto, vincule ao fornecedor e confira o cálculo automático da margem.</p></div></div>
+      <form id="product-form" class="editor">
+        <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
+        <input type="hidden" name="expected_updated_at" value="${escapeHtml(current?.atualizado_em || '')}">
+        <input type="hidden" id="prod-fornecedor-nome" name="fornecedor_nome" value="${escapeHtml(current?.fornecedor_nome || '')}">
+        
+        <div class="field full"><label for="prod-nome">Nome do produto *</label><input id="prod-nome" name="nome" maxlength="180" minlength="2" value="${escapeHtml(current?.nome || '')}" placeholder="Ex: Tábua Brie com Favo de Mel" required></div>
+        
+        <div class="field"><label for="prod-categoria">Categoria</label><input id="prod-categoria" name="categoria" maxlength="100" value="${escapeHtml(current?.categoria || 'Geral')}" placeholder="Ex: Queijos, Frios, Cestas, Vinhos"></div>
+        <div class="field"><label for="prod-fornecedor">Fornecedor vinculado *</label><select id="prod-fornecedor" name="fornecedor_id" required><option value="">Selecione o fornecedor</option>${suppliers.map(s => `<option value="${escapeHtml(s.id)}" ${current?.fornecedor_id === s.id ? 'selected' : ''}>${escapeHtml(s.fornecedor)}</option>`).join('')}</select></div>
+
+        <div class="field"><label for="prod-custo">Preço de Custo (R$) *</label><input id="prod-custo" name="preco_custo" type="text" inputmode="decimal" value="${current ? String(current.preco_custo).replace('.', ',') : '0,00'}" placeholder="0,00" required><small class="helper">Valor pago ao fornecedor pelo produto ou insumo.</small></div>
+        <div class="field"><label for="prod-venda">Preço de Venda (R$) *</label><input id="prod-venda" name="preco_venda" type="text" inputmode="decimal" value="${current ? String(current.preco_venda).replace('.', ',') : '0,00'}" placeholder="0,00" required><small class="helper">Preço de venda cobrado do cliente final.</small></div>
+
+        <!-- CÁLCULO AUTOMÁTICO DE MARGEM -->
+        <div class="field full">
+          <label>Cálculo Automático de Lucro e Margem</label>
+          <div class="margin-preview-pills" id="margin-pills">
+            <div class="dash-metric-pill"><span>Custo</span><strong id="margin-display-cost">${money(initialCalc.cost)}</strong></div>
+            <div class="dash-metric-pill"><span>Venda</span><strong id="margin-display-price">${money(initialCalc.price)}</strong></div>
+            <div class="dash-metric-pill ${initialCalc.profit >= 0 ? 'success' : 'danger'}"><span>Lucro Líquido</span><strong id="margin-display-profit">${money(initialCalc.profit)}</strong></div>
+            <div class="dash-metric-pill ${initialCalc.margin >= 30 ? 'success' : initialCalc.margin > 0 ? 'gold' : 'danger'}"><span>Margem de Lucro</span><strong id="margin-display-margin">${initialCalc.margin.toFixed(1)}%</strong></div>
+          </div>
+        </div>
+
+        <div class="field full">
+          <label>Foto do Produto (Google Drive)</label>
+          <div class="product-photo-row">
+            <div id="prod-photo-preview">${productPhoto ? `<img src="${escapeHtml(productPhoto)}" alt="" class="product-photo-thumb">` : '<div class="product-photo-thumb" style="display:grid;place-items:center;color:var(--muted);font-size:24px;">📷</div>'}</div>
+            <div>
+              <button type="button" class="button button-secondary" id="btn-prod-photo-upload">Selecionar foto</button>
+              ${productPhoto ? '<button type="button" class="tiny-button danger" id="btn-prod-photo-remove" style="margin-left:8px;">Remover foto</button>' : ''}
+              <input type="file" id="prod-photo-input" accept="image/jpeg,image/png" style="display:none">
+              <small class="helper" style="display:block;margin-top:6px;">A imagem será salva na pasta "fotos-produtos" do Google Drive.</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="field full"><label for="prod-descricao">Descrição do produto</label><textarea id="prod-descricao" name="descricao" rows="3" maxlength="4000" placeholder="Ingredientes, peso, detalhes artesanais, modo de conservação…">${escapeHtml(current?.descricao || '')}</textarea></div>
+        <div class="field full"><label class="access-module" style="margin:0;cursor:pointer;"><input type="checkbox" name="status" ${(current?.status || 'ativo') === 'ativo' ? 'checked' : ''}><span><b>Produto Ativo</b><small>Disponível para orçamentos e pedidos da SOLO.</small></span></label></div>
+
+        <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar produto</button></div>
+      </form>
+    </section>
+
+    <!-- PAINEL 2: LISTA DE PRODUTOS -->
+    <section class="content-card users-tab-panel" data-prods-panel="list" ${productsTab === 'list' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>Produtos cadastrados</h2><p>${products.length} produtos disponíveis</p></div><div class="toolbar"><input id="prods-search" aria-label="Buscar produtos" placeholder="Buscar produtos…"></div></div>
+      <div id="prods-table">${productRows()}</div>
+    </section>`;
+
+    bindProductActions();
+  }
+
+  function bindProductActions() {
+    workspace.querySelectorAll('[data-prods-tab]').forEach(btn => btn.addEventListener('click', () => {
+      productsTab = btn.dataset.prodsTab;
+      workspace.querySelectorAll('[data-prods-tab]').forEach(tab => {
+        const active = tab.dataset.prodsTab === productsTab;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      workspace.querySelectorAll('[data-prods-panel]').forEach(panel => {
+        panel.hidden = panel.dataset.prodsPanel !== productsTab;
+      });
+      if (productsTab === 'list') document.querySelector('#prods-search')?.focus();
+    }));
+
+    // Atualização em tempo real de Lucro e Margem
+    const costInput = document.querySelector('#prod-custo');
+    const priceInput = document.querySelector('#prod-venda');
+    const updateMarginPreview = () => {
+      const calc = calcProfitMargin(costInput?.value, priceInput?.value);
+      const costEl = document.querySelector('#margin-display-cost');
+      const priceEl = document.querySelector('#margin-display-price');
+      const profitEl = document.querySelector('#margin-display-profit');
+      const marginEl = document.querySelector('#margin-display-margin');
+      if (costEl) costEl.textContent = money(calc.cost);
+      if (priceEl) priceEl.textContent = money(calc.price);
+      if (profitEl) {
+        profitEl.textContent = money(calc.profit);
+        profitEl.parentElement.className = `dash-metric-pill ${calc.profit >= 0 ? 'success' : 'danger'}`;
+      }
+      if (marginEl) {
+        marginEl.textContent = `${calc.margin.toFixed(1)}%`;
+        marginEl.parentElement.className = `dash-metric-pill ${calc.margin >= 30 ? 'success' : calc.margin > 0 ? 'gold' : 'danger'}`;
+      }
+    };
+    costInput?.addEventListener('input', updateMarginPreview);
+    priceInput?.addEventListener('input', updateMarginPreview);
+
+    // Seleção de fornecedor atualiza o nome oculto
+    const supplierSelect = document.querySelector('#prod-fornecedor');
+    supplierSelect?.addEventListener('change', () => {
+      const opt = supplierSelect.selectedOptions[0];
+      const nameInput = document.querySelector('#prod-fornecedor-nome');
+      if (nameInput) nameInput.value = opt ? opt.textContent : '';
+    });
+
+    // Upload de foto do produto
+    const photoUploadBtn = document.querySelector('#btn-prod-photo-upload');
+    const photoInput = document.querySelector('#prod-photo-input');
+    const photoRemoveBtn = document.querySelector('#btn-prod-photo-remove');
+    let photoDataUrl = '';
+    let removePhotoFlag = false;
+
+    photoUploadBtn?.addEventListener('click', () => photoInput?.click());
+    photoInput?.addEventListener('change', async e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      photoInput.value = '';
+      try {
+        photoDataUrl = await readAndResizeImage(file);
+        removePhotoFlag = false;
+        const preview = document.querySelector('#prod-photo-preview');
+        if (preview) preview.innerHTML = `<img src="${photoDataUrl}" alt="" class="product-photo-thumb">`;
+      } catch (err) {
+        toast('Erro ao processar foto: ' + err.message, true);
+      }
+    });
+    photoRemoveBtn?.addEventListener('click', () => {
+      photoDataUrl = '';
+      removePhotoFlag = true;
+      const preview = document.querySelector('#prod-photo-preview');
+      if (preview) preview.innerHTML = '<div class="product-photo-thumb" style="display:grid;place-items:center;color:var(--muted);font-size:24px;">📷</div>';
+      photoRemoveBtn.remove();
+    });
+
+    const form = document.querySelector('#product-form');
+    form?.addEventListener('reset', e => {
+      e.preventDefault();
+      editingProductId = '';
+      productPhoto = '';
+      renderProducts();
+    });
+    form?.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!form.reportValidity()) return;
+      const submitBtn = form.querySelector('[type="submit"]');
+      submitBtn.disabled = true;
+      const fd = new FormData(form);
+      const supplierOpt = supplierSelect?.selectedOptions[0];
+      const record = {
+        id: fd.get('id') || '',
+        expected_updated_at: fd.get('expected_updated_at') || '',
+        nome: fd.get('nome'),
+        categoria: fd.get('categoria'),
+        fornecedor_id: fd.get('fornecedor_id'),
+        fornecedor_nome: supplierOpt ? supplierOpt.textContent : '',
+        preco_custo: fd.get('preco_custo'),
+        preco_venda: fd.get('preco_venda'),
+        descricao: fd.get('descricao'),
+        status: fd.get('status') === 'on' ? 'ativo' : 'inativo'
+      };
+      if (photoDataUrl) record.foto_data_url = photoDataUrl;
+      else if (removePhotoFlag) record.remove_photo = true;
+
+      try {
+        const saved = await api(record.id ? 'updateProduct' : 'createProduct', {record});
+        const idx = products.findIndex(p => p.id === saved.id);
+        if (idx >= 0) products[idx] = saved; else products.push(saved);
+        editingProductId = '';
+        productPhoto = '';
+        productsTab = 'list';
+        renderProducts();
+        toast('Produto salvo com sucesso.');
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    const search = document.querySelector('#prods-search');
+    search?.addEventListener('input', () => {
+      const table = document.querySelector('#prods-table');
+      if (table) table.innerHTML = productRows(search.value);
+      bindProductTableActions();
+    });
+
+    bindProductTableActions();
+  }
+
+  function bindProductTableActions() {
+    workspace.querySelectorAll('[data-prod-edit]').forEach(btn => btn.addEventListener('click', () => {
+      editingProductId = btn.dataset.prodEdit;
+      const p = products.find(item => item.id === editingProductId);
+      productPhoto = p?.foto_url || '';
+      productsTab = 'editor';
+      renderProducts();
+      workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});
+    }));
+    workspace.querySelectorAll('[data-prod-delete]').forEach(btn => btn.addEventListener('click', async () => {
+      const selected = products.find(item => item.id === btn.dataset.prodDelete);
+      if (!selected || !confirm(`Excluir o produto "${selected.nome}"?`)) return;
+      btn.disabled = true;
+      try {
+        await api('deleteProduct', {id: selected.id, version: selected.atualizado_em});
+        products = products.filter(p => p.id !== selected.id);
+        if (editingProductId === selected.id) {
+          editingProductId = '';
+          productPhoto = '';
+        }
+        productsTab = 'list';
+        renderProducts();
+        toast('Produto excluído com sucesso.');
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, true);
+      }
     }));
   }
 
