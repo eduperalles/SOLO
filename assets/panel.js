@@ -8,15 +8,18 @@
   let clients = [];
   let suppliers = [];
   let products = [];
+  let coupons = [];
   let siteMenuConfig = { menu_titulo: 'Eventos', secao_titulo: 'Eventos & Celebrações', secao_subtitulo: '', ativo: '1' };
   let siteCards = [];
   let clientsTab = 'editor';
   let suppliersTab = 'editor';
   let productsTab = 'editor';
+  let couponsTab = 'editor';
   let siteMenuTab = 'config';
   let editingClientId = '';
   let editingSupplierId = '';
   let editingProductId = '';
+  let editingCouponId = '';
   let productPhoto = '';
   let editingCardId = '';
   let cardPhotos = [];
@@ -25,7 +28,7 @@
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
-    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('products') && !canAccess('site_menu');
+    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('products') && !canAccess('coupons') && !canAccess('site_menu');
   }
   let activePage = 'dashboard';
   let editingId = '';
@@ -85,6 +88,10 @@
       createProduct:'Salvando produto',
       updateProduct:'Salvando produto',
       deleteProduct:'Excluindo produto',
+      listCoupons:'Carregando cupons',
+      createCoupon:'Salvando cupom',
+      updateCoupon:'Salvando cupom',
+      deleteCoupon:'Excluindo cupom',
       listOrders:'Carregando pedidos',
       retryOrder:'Concluindo gravação do pedido',
       deleteOrder:'Excluindo pedido',
@@ -164,19 +171,20 @@
       return;
     }
     activePage = page;
-    if (['users','clients','suppliers','products','site_menu'].includes(page)) {
+    if (['users','clients','suppliers','products','coupons','site_menu'].includes(page)) {
       document.querySelector('#registrations-items').hidden = false;
       document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
     }
-    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','products','site_menu'].includes(page));
+    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','products','coupons','site_menu'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'products' ? 'Produtos' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'products' ? 'Produtos' : page === 'coupons' ? 'Cupons' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     document.querySelector('#sidebar').classList.remove('open');
     if (page === 'dashboard') void loadDashboardPage();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
     else if (page === 'suppliers') void loadSuppliersPage();
     else if (page === 'products') void loadProductsPage();
+    else if (page === 'coupons') void loadCouponsPage();
     else if (page === 'site_menu') void loadSiteMenuPage();
     else if (page === 'orders') void loadOrdersPage();
     else if (page === 'finance') void loadFinancePage();
@@ -504,6 +512,12 @@
                 <td><code>PRODUCTS_FILE_ID</code></td>
               </tr>
               <tr>
+                <td><b>cupons.csv</b></td>
+                <td><span class="badge">CSV</span></td>
+                <td>Cadastro de cupons de desconto para compras no site com código, valor, destinatário e controle de uso.</td>
+                <td><code>COUPONS_FILE_ID</code></td>
+              </tr>
+              <tr>
                 <td><b>fotos-produtos</b></td>
                 <td><span class="badge">Pasta</span></td>
                 <td>Pasta pública no Google Drive para armazenamento das fotos dos produtos do catálogo da SOLO.</td>
@@ -682,7 +696,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','clients','suppliers','products','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','suppliers','products','coupons','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -1213,6 +1227,242 @@
         productsTab = 'list';
         renderProducts();
         toast('Produto excluído com sucesso.');
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, true);
+      }
+    }));
+  }
+
+  function openCouponClientPicker() {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'user-picker';
+    dialog.setAttribute('aria-labelledby','coupon-client-picker-title');
+    dialog.innerHTML = `<div class="card-head"><h2 id="coupon-client-picker-title">Selecionar cliente destinatário</h2><button class="tiny-button" id="close-coupon-client-picker" type="button">Fechar</button></div>
+      <div class="field"><label for="coupon-client-search">Buscar cliente por nome, e-mail ou WhatsApp</label><input id="coupon-client-search" type="search" placeholder="Digite para buscar…"></div><div id="coupon-client-results" class="picker-results"></div>`;
+    document.body.append(dialog);
+    const search = dialog.querySelector('#coupon-client-search');
+    const results = dialog.querySelector('#coupon-client-results');
+    const render = () => {
+      const query = search.value.trim().toLocaleLowerCase('pt-BR');
+      const found = clients.filter(item => `${item.nome} ${item.email} ${item.whatsapp}`.toLocaleLowerCase('pt-BR').includes(query));
+      let html = `<button type="button" class="picker-user" data-picker-coupon-client="" data-picker-coupon-client-name="" data-picker-coupon-client-phone=""><span><b>Livre (Qualquer cliente)</b><small>Cupom de uso geral, não restrito a um cliente específico</small></span><span class="badge">Livre</span></button>`;
+      html += found.length ? found.map(item => `<button type="button" class="picker-user" data-picker-coupon-client="${escapeHtml(item.id)}" data-picker-coupon-client-name="${escapeHtml(item.nome)}" data-picker-coupon-client-phone="${escapeHtml(item.whatsapp)}"><span><b>${escapeHtml(item.nome)}</b><small>${escapeHtml(item.email)} · ${escapeHtml(formatWhatsapp(item.whatsapp))}</small></span><span class="badge">Cliente</span></button>`).join('') : '<div class="empty">Nenhum cliente encontrado.</div>';
+      results.innerHTML = html;
+    };
+    search.addEventListener('input', render);
+    results.addEventListener('click', event => {
+      const button = event.target.closest('[data-picker-coupon-client]');
+      if (!button) return;
+      dialog.close();
+      const nameInput = document.querySelector('#coupon-client-nome');
+      const idInput = document.querySelector('#coupon-client-id');
+      const phoneInput = document.querySelector('#coupon-client-phone');
+      if (nameInput) nameInput.value = button.dataset.pickerCouponClientName || 'Livre para qualquer cliente';
+      if (idInput) idInput.value = button.dataset.pickerCouponClient || '';
+      if (phoneInput) phoneInput.value = button.dataset.pickerCouponClientPhone || '';
+    });
+    dialog.querySelector('#close-coupon-client-picker').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove(), {once:true});
+    render(); dialog.showModal(); search.focus();
+  }
+
+  async function loadCouponsPage() {
+    workspace.innerHTML = '<div class="workspace-state">Carregando cupons…</div>';
+    try {
+      const [coupRes, cliRes] = await Promise.all([
+        api('listCoupons').catch(() => []),
+        api('listClients').catch(() => [])
+      ]);
+      if (activePage !== 'coupons') return;
+      coupons = coupRes || [];
+      clients = cliRes || [];
+      renderCoupons();
+    } catch (error) {
+      if (activePage === 'coupons') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function couponRows(filter = '') {
+    const query = filter.trim().toLocaleLowerCase('pt-BR');
+    const visible = coupons.filter(c => `${c.codigo} ${c.cliente_nome} ${c.desconto_valor}`.toLocaleLowerCase('pt-BR').includes(query));
+    if (!visible.length) return '<div class="empty">Nenhum cupom encontrado.</div>';
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Código</th><th>Desconto</th><th>Pedido Mínimo</th><th>Destinatário</th><th>Utilizações</th><th>Validade</th><th>Status</th><th>Ações</th></tr></thead><tbody>${visible.map(c => {
+      const statusBadge = c.status === 'utilizado' ? 'inactive' : c.status === 'ativo' ? '' : 'gold';
+      const client = clients.find(item => item.id === c.cliente_id);
+      const phone = client ? client.whatsapp : '';
+      const waText = `Olá${c.cliente_nome ? `, ${c.cliente_nome}` : ''}! Aqui está o seu cupom de desconto exclusivo no valor de ${money(c.desconto_valor)} da SOLO Ateliê: *${c.codigo}*. Aproveite em nosso site: https://soloatelie.com.br`;
+      const waLink = phone ? `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(waText)}` : `https://wa.me/?text=${encodeURIComponent(waText)}`;
+      return `<tr>
+        <td><div style="display:flex;align-items:center;gap:6px;"><code style="font-size:13px;font-weight:700;letter-spacing:1px;background:#f0ece4;padding:3px 7px;border-radius:4px;">${escapeHtml(c.codigo)}</code><button class="tiny-button" type="button" data-copy-coupon="${escapeHtml(c.codigo)}" title="Copiar código">Copiar</button></div></td>
+        <td><b style="color:var(--success);font-size:13px;">${money(c.desconto_valor)}</b></td>
+        <td>${Number(c.valor_minimo) > 0 ? money(c.valor_minimo) : '<span class="helper">Sem mínimo</span>'}</td>
+        <td><b>${escapeHtml(c.cliente_nome || 'Qualquer cliente')}</b></td>
+        <td><span>${escapeHtml(c.usos_atuais || '0')} / ${escapeHtml(c.limite_usos || '1')}</span></td>
+        <td>${c.validade ? escapeHtml(displayClientDate(c.validade)) : '<span class="helper">Sem expiração</span>'}</td>
+        <td><span class="badge ${statusBadge}">${c.status === 'utilizado' ? 'Utilizado' : c.status === 'ativo' ? 'Ativo' : 'Inativo'}</span></td>
+        <td><div class="row-actions"><a class="tiny-button whatsapp" href="${waLink}" target="_blank" rel="noopener noreferrer" title="Enviar cupom pelo WhatsApp">${whatsappSvg} Enviar</a><button class="tiny-button" type="button" data-coupon-edit="${escapeHtml(c.id)}">Editar</button><button class="tiny-button danger" type="button" data-coupon-delete="${escapeHtml(c.id)}">Excluir</button></div></td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+
+  function renderCoupons() {
+    const current = coupons.find(c => c.id === editingCouponId);
+    workspace.innerHTML = `<div class="users-tabs" role="tablist" aria-label="Cadastro de cupons">
+      <button class="users-tab ${couponsTab === 'editor' ? 'active' : ''}" type="button" role="tab" data-coupons-tab="editor" aria-selected="${couponsTab === 'editor'}">Cadastro / edição</button>
+      <button class="users-tab ${couponsTab === 'list' ? 'active' : ''}" type="button" role="tab" data-coupons-tab="list" aria-selected="${couponsTab === 'list'}">Cupons cadastrados <span>${coupons.length}</span></button>
+    </div>
+
+    <!-- PAINEL 1: CADASTRO / EDIÇÃO -->
+    <section class="content-card users-tab-panel" data-coupons-panel="editor" ${couponsTab === 'editor' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>${current ? 'Editar cupom' : 'Cadastrar cupom'}</h2><p>Gere cupons com valor de desconto para compras no site e envie diretamente aos clientes.</p></div></div>
+      <form id="coupon-form" class="editor">
+        <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
+        <input type="hidden" name="expected_updated_at" value="${escapeHtml(current?.atualizado_em || '')}">
+        <input type="hidden" id="coupon-client-id" name="cliente_id" value="${escapeHtml(current?.cliente_id || '')}">
+        <input type="hidden" id="coupon-client-phone" value="">
+
+        <div class="field full">
+          <label for="coupon-code">Código do Cupom *</label>
+          <div class="settings-selector">
+            <input id="coupon-code" name="codigo" maxlength="30" minlength="3" value="${escapeHtml(current?.codigo || '')}" placeholder="Ex: SOLO-AF39B ou BEMVINDO15" style="text-transform:uppercase;font-weight:700;letter-spacing:1px;" required>
+            <button class="button button-secondary" id="btn-generate-coupon-code" type="button" style="white-space:nowrap;font-size:12px;">Gerar código aleatório</button>
+          </div>
+          <small class="helper">O código que o cliente digitará no checkout do site.</small>
+        </div>
+
+        <div class="field"><label for="coupon-discount">Valor do Desconto (R$) *</label><input id="coupon-discount" name="desconto_valor" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.desconto_valor)*100) : '')}" placeholder="0,00" required><small class="helper">Valor que será subtraído do total do pedido.</small></div>
+        <div class="field"><label for="coupon-min-order">Pedido Mínimo (R$)</label><input id="coupon-min-order" name="valor_minimo" type="text" inputmode="decimal" value="${escapeHtml(current && Number(current.valor_minimo) > 0 ? maskCurrency(Number(current.valor_minimo)*100) : '0,00')}" placeholder="0,00"><small class="helper">Valor mínimo do carrinho para validar o cupom (opcional).</small></div>
+
+        <div class="field"><label for="coupon-limit">Limite de Utilizações</label><input id="coupon-limit" name="limite_usos" type="number" min="1" max="9999" value="${escapeHtml(current?.limite_usos || '1')}" required><small class="helper">Padrão 1 para uso único.</small></div>
+        <div class="field"><label for="coupon-client-nome">Destinatário (Cliente)</label>
+          <div class="settings-selector"><input id="coupon-client-nome" name="cliente_nome" value="${escapeHtml(current?.cliente_nome || 'Livre para qualquer cliente')}" placeholder="Clique na lupa para selecionar" readonly><button class="button" id="find-coupon-client" type="button" aria-label="Buscar cliente">${searchIcon}</button></div>
+          <small class="helper">Vincule a um cliente para envio rápido via WhatsApp ou deixe livre.</small>
+        </div>
+
+        <div class="field"><label for="coupon-validity">Data de Validade</label><input id="coupon-validity" name="validade" type="date" value="${escapeHtml(current?.validade || '')}"><small class="helper">Deixe em branco para cupom sem data de expiração.</small></div>
+        <div class="field"><label class="access-module" style="margin-top:28px;cursor:pointer;"><input type="checkbox" name="status" ${(current?.status || 'ativo') === 'ativo' ? 'checked' : ''}><span><b>Cupom Ativo</b><small>Disponível para validação e desconto no site.</small></span></label></div>
+
+        <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar cupom</button></div>
+      </form>
+    </section>
+
+    <!-- PAINEL 2: LISTA DE CUPONS -->
+    <section class="content-card users-tab-panel" data-coupons-panel="list" ${couponsTab === 'list' ? '' : 'hidden'}>
+      <div class="card-head"><div><h2>Cupons cadastrados</h2><p>${coupons.length} cupons disponíveis</p></div><div class="toolbar"><input id="coupons-search" aria-label="Buscar cupons" placeholder="Buscar cupons…"></div></div>
+      <div id="coupons-table">${couponRows()}</div>
+    </section>`;
+
+    bindCouponActions();
+  }
+
+  function bindCouponActions() {
+    workspace.querySelectorAll('[data-coupons-tab]').forEach(btn => btn.addEventListener('click', () => {
+      couponsTab = btn.dataset.couponsTab;
+      workspace.querySelectorAll('[data-coupons-tab]').forEach(tab => {
+        const active = tab.dataset.couponsTab === couponsTab;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      workspace.querySelectorAll('[data-coupons-panel]').forEach(panel => {
+        panel.hidden = panel.dataset.couponsPanel !== couponsTab;
+      });
+      if (couponsTab === 'list') document.querySelector('#coupons-search')?.focus();
+    }));
+
+    const discountInput = document.querySelector('#coupon-discount');
+    const minInput = document.querySelector('#coupon-min-order');
+    discountInput?.addEventListener('input', event => event.target.value = maskCurrency(event.target.value));
+    minInput?.addEventListener('input', event => event.target.value = maskCurrency(event.target.value));
+
+    document.querySelector('#find-coupon-client')?.addEventListener('click', openCouponClientPicker);
+
+    document.querySelector('#btn-generate-coupon-code')?.addEventListener('click', () => {
+      const codeInput = document.querySelector('#coupon-code');
+      if (codeInput) {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let rnd = 'SOLO-';
+        for (let i = 0; i < 6; i++) rnd += chars.charAt(Math.floor(Math.random() * chars.length));
+        codeInput.value = rnd;
+      }
+    });
+
+    const form = document.querySelector('#coupon-form');
+    form?.addEventListener('reset', e => {
+      e.preventDefault();
+      editingCouponId = '';
+      renderCoupons();
+    });
+    form?.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!form.reportValidity()) return;
+      const submitBtn = form.querySelector('[type="submit"]');
+      submitBtn.disabled = true;
+      const fd = new FormData(form);
+      const record = {
+        id: fd.get('id') || '',
+        expected_updated_at: fd.get('expected_updated_at') || '',
+        codigo: String(fd.get('codigo') || '').trim().toUpperCase(),
+        desconto_valor: parseCurrency(fd.get('desconto_valor')),
+        valor_minimo: parseCurrency(fd.get('valor_minimo')) || '0.00',
+        limite_usos: fd.get('limite_usos') || '1',
+        cliente_id: fd.get('cliente_id') || '',
+        cliente_nome: fd.get('cliente_nome') === 'Livre para qualquer cliente' ? '' : fd.get('cliente_nome') || '',
+        validade: fd.get('validade') || '',
+        status: fd.get('status') === 'on' ? 'ativo' : 'inativo'
+      };
+      try {
+        const saved = await api(record.id ? 'updateCoupon' : 'createCoupon', {record});
+        const idx = coupons.findIndex(c => c.id === saved.id);
+        if (idx >= 0) coupons[idx] = saved; else coupons.push(saved);
+        editingCouponId = '';
+        couponsTab = 'list';
+        renderCoupons();
+        toast('Cupom salvo com sucesso.');
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    const search = document.querySelector('#coupons-search');
+    search?.addEventListener('input', () => {
+      const table = document.querySelector('#coupons-table');
+      if (table) table.innerHTML = couponRows(search.value);
+      bindCouponTableActions();
+    });
+
+    bindCouponTableActions();
+  }
+
+  function bindCouponTableActions() {
+    workspace.querySelectorAll('[data-copy-coupon]').forEach(btn => btn.addEventListener('click', async () => {
+      const code = btn.dataset.copyCoupon;
+      try {
+        await navigator.clipboard.writeText(code);
+        toast(`Código ${code} copiado!`);
+      } catch (_) {
+        toast(`Código: ${code}`);
+      }
+    }));
+    workspace.querySelectorAll('[data-coupon-edit]').forEach(btn => btn.addEventListener('click', () => {
+      editingCouponId = btn.dataset.couponEdit;
+      couponsTab = 'editor';
+      renderCoupons();
+      workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});
+    }));
+    workspace.querySelectorAll('[data-coupon-delete]').forEach(btn => btn.addEventListener('click', async () => {
+      const selected = coupons.find(item => item.id === btn.dataset.couponDelete);
+      if (!selected || !confirm(`Excluir o cupom "${selected.codigo}"?`)) return;
+      btn.disabled = true;
+      try {
+        await api('deleteCoupon', {id: selected.id, version: selected.atualizado_em});
+        coupons = coupons.filter(c => c.id !== selected.id);
+        if (editingCouponId === selected.id) editingCouponId = '';
+        couponsTab = 'list';
+        renderCoupons();
+        toast('Cupom excluído com sucesso.');
       } catch (err) {
         btn.disabled = false;
         toast(err.message, true);

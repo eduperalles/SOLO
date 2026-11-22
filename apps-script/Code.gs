@@ -4,16 +4,17 @@ const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_ve
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
 const SUPPLIER_COLUMNS_ = ['id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
 const PRODUCT_COLUMNS_ = ['id','nome','categoria','fornecedor_id','fornecedor_nome','preco_custo','preco_venda','margem_lucro','foto_arquivo_id','descricao','status','criado_em','atualizado_em'];
+const COUPON_COLUMNS_ = ['id','codigo','desconto_valor','tipo','valor_minimo','cliente_id','cliente_nome','limite_usos','usos_atuais','validade','status','criado_em','atualizado_em'];
 const MENU_CONFIG_COLUMNS_ = ['id','menu_titulo','secao_titulo','secao_subtitulo','ativo','atualizado_em'];
 const MENU_CARD_COLUMNS_ = ['id','titulo','descricao','fotos_json','ordem','ativo','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','products','site_menu','orders','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'products',name:'Produtos'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','products','coupons','site_menu','orders','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'products',name:'Produtos'},{id:'coupons',name:'Cupons'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -27,10 +28,11 @@ function doPost(event) {
 }
 
 function dispatch_(request) {
-  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout','getSiteMenuData','submitBudgetRequest'];
+  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout','getSiteMenuData','submitBudgetRequest','validateCoupon'];
   const actor = publicActions.includes(request.action) ? null : auth_(request.token);
   switch (request.action) {
     case 'placeOrder': return placeOrder_(request);
+    case 'validateCoupon': return validateCoupon_(request);
     case 'requestCustomerCode': return requestCustomerCode_(request);
     case 'verifyCustomerCode': return verifyCustomerCode_(request);
     case 'customerOrders': return customerOrders_(request);
@@ -62,6 +64,10 @@ function dispatch_(request) {
     case 'createProduct': return saveProduct_(actor, request.record || {}, 'create');
     case 'updateProduct': return saveProduct_(actor, request.record || {}, 'update');
     case 'deleteProduct': return deleteProduct_(actor, request.id, request.version);
+    case 'listCoupons': module_(actor, 'coupons'); return readCoupons_();
+    case 'createCoupon': return saveCoupon_(actor, request.record || {}, 'create');
+    case 'updateCoupon': return saveCoupon_(actor, request.record || {}, 'update');
+    case 'deleteCoupon': return deleteCoupon_(actor, request.id, request.version);
     case 'getUserPhotos': return getUserPhotos_(actor, request.ids);
     case 'createUser': return saveUser_(actor, request.record || {}, 'create');
     case 'updateUser': return saveUser_(actor, request.record || {}, 'update');
@@ -139,15 +145,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','products','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','products','coupons','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,products:true,site_menu:true,orders:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,products:true,coupons:true,site_menu:true,orders:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',products:!!row && row.products === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',products:!!row && row.products === '1',coupons:!!row && row.coupons === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -170,11 +176,11 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','products','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','products','coupons','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',products:input.products === undefined ? (index < 0 ? '0' : rows[index].products || '0') : input.products ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',products:input.products === undefined ? (index < 0 ? '0' : rows[index].products || '0') : input.products ? '1' : '0',coupons:input.coupons === undefined ? (index < 0 ? '0' : rows[index].coupons || '0') : input.coupons ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
@@ -484,6 +490,137 @@ function deleteProduct_(actor, id, version) {
     }
 
     saveProductRows_(rows.filter(r => r.id !== selected.id));
+    return {deleted: true};
+  });
+}
+
+function getCouponsFile_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('COUPONS_FILE_ID');
+  if (id) {
+    try {
+      return DriveApp.getFileById(id);
+    } catch (_) {}
+  }
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const files = folder.getFilesByName('cupons.csv');
+  const file = files.hasNext() ? files.next() : folder.createFile('cupons.csv', csv_(COUPON_COLUMNS_, []), 'text/csv');
+  props.setProperty('COUPONS_FILE_ID', file.getId());
+  return file;
+}
+
+function readCoupons_() {
+  const file = getCouponsFile_();
+  const text = file.getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
+  if (!text.trim()) return [];
+  const matrix = Utilities.parseCsv(text);
+  const headers = matrix.shift() || [];
+  if (COUPON_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de cupons.csv inválido.');
+  return matrix.filter(r => r.some(Boolean)).map(r => Object.fromEntries(headers.map((k, i) => [k, r[i] || ''])));
+}
+
+function saveCouponRows_(rows) {
+  const file = getCouponsFile_();
+  file.setContent(csv_(COUPON_COLUMNS_, rows));
+}
+
+function validateCoupon_(request) {
+  const codigo = String(request.codigo || '').trim().toUpperCase();
+  const subtotal = Math.max(0, Number(request.subtotal) || 0);
+  if (!codigo) throw Error('Informe o código do cupom.');
+
+  const coupons = readCoupons_();
+  const coupon = coupons.find(c => c.codigo.trim().toUpperCase() === codigo);
+  if (!coupon) throw Error('Cupom não encontrado.');
+  if (coupon.status !== 'ativo') throw Error('Este cupom não está mais ativo.');
+
+  const limit = Number(coupon.limite_usos || 1);
+  const uses = Number(coupon.usos_atuais || 0);
+  if (limit > 0 && uses >= limit) throw Error('Este cupom já atingiu o limite de utilizações.');
+
+  const today = brazilDate_();
+  if (coupon.validade && coupon.validade < today) throw Error('Este cupom expirou em ' + coupon.validade.split('-').reverse().join('/') + '.');
+
+  const minVal = Number(coupon.valor_minimo || 0);
+  if (minVal > 0 && subtotal < minVal) {
+    const brl = v => 'R$ ' + Number(v).toFixed(2).replace('.', ',');
+    throw Error('Este cupom exige pedido mínimo de ' + brl(minVal) + '.');
+  }
+
+  const desconto = Math.min(subtotal, Math.max(0, Number(coupon.desconto_valor || 0)));
+  const total = Math.max(0, subtotal - desconto);
+
+  return {
+    valid: true,
+    codigo: coupon.codigo,
+    desconto_valor: desconto,
+    valor_minimo: minVal,
+    total_com_desconto: total
+  };
+}
+
+function saveCoupon_(actor, input, operation) {
+  module_(actor, 'coupons');
+  const id = String(input.id || '');
+  let codigo = String(input.codigo || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  if (!codigo) {
+    codigo = ('SOLO-' + Utilities.getUuid().replace(/-/g, '').slice(0, 6)).toUpperCase();
+  }
+  const desconto_valor = Math.max(0, Number(String(input.desconto_valor ?? '0').replace(',', '.')) || 0);
+  const tipo = String(input.tipo || 'valor_fixo');
+  const valor_minimo = Math.max(0, Number(String(input.valor_minimo ?? '0').replace(',', '.')) || 0);
+  const cliente_id = String(input.cliente_id || '').trim();
+  const cliente_nome = String(input.cliente_nome || '').trim();
+  const limite_usos = Math.max(1, Number(input.limite_usos) || 1);
+  const validade = String(input.validade || '').trim();
+  const status = input.status === 'inativo' || input.status === false ? 'inativo' : 'ativo';
+
+  if (codigo.length < 3 || codigo.length > 30) throw Error('O código do cupom deve ter de 3 a 30 caracteres alfanuméricos.');
+  if (desconto_valor <= 0) throw Error('O valor do desconto deve ser maior que zero.');
+  if (validade && !isFinanceDate_(validade)) throw Error('Informe uma data de validade válida.');
+
+  return withLock_(() => {
+    const rows = readCoupons_();
+    const index = operation === 'update' ? rows.findIndex(r => r.id === id) : -1;
+    const old = rows[index];
+    if (operation === 'update' && !old) throw Error('Cupom não encontrado.');
+    if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Cupom atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+
+    if (rows.some(r => r.id !== id && r.codigo.toUpperCase() === codigo)) {
+      throw Error('Já existe um cupom cadastrado com este código.');
+    }
+
+    const stamp = now_();
+    const record = {
+      id: old ? old.id : Utilities.getUuid(),
+      codigo,
+      desconto_valor: desconto_valor.toFixed(2),
+      tipo,
+      valor_minimo: valor_minimo.toFixed(2),
+      cliente_id,
+      cliente_nome,
+      limite_usos: String(limite_usos),
+      usos_atuais: old ? String(old.usos_atuais || '0') : '0',
+      validade,
+      status,
+      criado_em: old ? old.criado_em : stamp,
+      atualizado_em: stamp
+    };
+
+    if (old) rows[index] = record; else rows.push(record);
+    saveCouponRows_(rows);
+    return record;
+  });
+}
+
+function deleteCoupon_(actor, id, version) {
+  module_(actor, 'coupons');
+  return withLock_(() => {
+    const rows = readCoupons_();
+    const selected = rows.find(r => r.id === String(id || ''));
+    if (!selected) throw Error('Cupom não encontrado.');
+    if (String(version || '') !== selected.atualizado_em) throw Error('Cupom atualizado por outra sessão. Atualize a lista antes de excluir.');
+    saveCouponRows_(rows.filter(r => r.id !== selected.id));
     return {deleted: true};
   });
 }
@@ -1200,7 +1337,7 @@ function constantTime_(first, second) {
 const ORDER_CATALOG_ = [{"id":101,"nome":"SOLO Afeto","centavos":3000,"slogan":""},{"id":102,"nome":"SOLO Essencial","centavos":5600,"slogan":""},{"id":103,"nome":"SOLO Conexão","centavos":9800,"slogan":""},{"id":104,"nome":"SOLO Celebração","centavos":22000,"slogan":""},{"id":105,"nome":"SOLO Alvorada","centavos":6000,"slogan":""},{"id":106,"nome":"SOLO Harmonia","centavos":19500,"slogan":""},{"id":107,"nome":"SOLO Melodia","centavos":8500,"slogan":""},{"id":108,"nome":"SOLO Love","centavos":15000,"slogan":""},{"id":109,"nome":"SOLO Prisma","centavos":11000,"slogan":""},{"id":110,"nome":"SOLO Legado","centavos":20000,"slogan":""},{"id":111,"nome":"SOLO Broto","centavos":5700,"slogan":""},{"id":112,"nome":"SOLO Colheita","centavos":7300,"slogan":""},{"id":113,"nome":"SOLO Essência","centavos":4800,"slogan":""},{"id":114,"nome":"SOLO Especial","centavos":14000,"slogan":""},{"id":201,"nome":"Pão Italiano (100g)","centavos":399,"slogan":""},{"id":202,"nome":"Pão Australiano (100g)","centavos":399,"slogan":""},{"id":203,"nome":"Mini Pão Francês","centavos":380,"slogan":""},{"id":204,"nome":"Queijo Brie (20g)","centavos":400,"slogan":""},{"id":205,"nome":"Queijo Gorgonzola (30g)","centavos":550,"slogan":""},{"id":206,"nome":"Queijo Gouda c/ervas (40g)","centavos":500,"slogan":""},{"id":207,"nome":"Queijo Provolone (20g)","centavos":350,"slogan":""},{"id":208,"nome":"Queijo Provolone c/orégano (40g)","centavos":550,"slogan":""},{"id":209,"nome":"Queijo Emmental (40g)","centavos":550,"slogan":""},{"id":210,"nome":"Palito Queijo Mussarela Condimentado (20g)","centavos":700,"slogan":""},{"id":211,"nome":"Queijo Minas Especial (30g)","centavos":600,"slogan":""},{"id":212,"nome":"Bolacha de Queijo Coalho Desidratado (40g)","centavos":1150,"slogan":""},{"id":213,"nome":"Bolacha de Provolone Desidratado (40g)","centavos":1150,"slogan":""},{"id":300,"nome":"Salame Italiano (40g)","centavos":1750,"slogan":""},{"id":301,"nome":"Copa Duroc (40g)","centavos":2000,"slogan":""},{"id":302,"nome":"Lonza Duroc (40g)","centavos":2000,"slogan":""},{"id":303,"nome":"Presunto Cru - Fiocco (40g)","centavos":2000,"slogan":""},{"id":304,"nome":"Lombo Defumado (40g)","centavos":1450,"slogan":""},{"id":305,"nome":"Salame Jabuticaba (40g)","centavos":1150,"slogan":""},{"id":400,"nome":"Geléia de Pimenta (50g)","centavos":1160,"slogan":""},{"id":401,"nome":"Torradas simples (7 Unid.)","centavos":400,"slogan":""},{"id":402,"nome":"Biscoito de Linhaça com Alho (30g)","centavos":450,"slogan":""},{"id":403,"nome":"Mel - favo (50g)","centavos":700,"slogan":""},{"id":404,"nome":"Mix de Nuts (40g)","centavos":600,"slogan":""},{"id":405,"nome":"Castanha de Caju (40g)","centavos":450,"slogan":""},{"id":406,"nome":"Milho com Mostarda (30g)","centavos":800,"slogan":""},{"id":407,"nome":"Chips de Beterraba (30g)","centavos":500,"slogan":""},{"id":408,"nome":"Chips de Abóbora (30g)","centavos":500,"slogan":""},{"id":409,"nome":"Chips de Banana Picante (30g)","centavos":450,"slogan":""},{"id":410,"nome":"Chips de Jaca (30g)","centavos":750,"slogan":""},{"id":411,"nome":"Macadamia com sal (30g)","centavos":600,"slogan":""},{"id":412,"nome":"Damasco (30g)","centavos":700,"slogan":""},{"id":413,"nome":"Tâmara sem caroço (30g)","centavos":500,"slogan":""},{"id":218,"nome":"Coração de Pelúcia","centavos":1500,"slogan":""},{"id":219,"nome":"Ursinho de Pelúcia","centavos":1200,"slogan":""}];
 
 // Pedidos do site e acesso isolado dos clientes.
-const ORDER_COLUMNS_ = ['id','numero','chave_idempotencia','payload_hash','cliente_id','nome','email','whatsapp','itens_json','total','entrega','endereco','cep','observacoes','mensagem','status','conta_receber_id','data_pedido','criado_em','atualizado_em'];
+const ORDER_COLUMNS_ = ['id','numero','chave_idempotencia','payload_hash','cliente_id','nome','email','whatsapp','itens_json','total','entrega','endereco','cep','observacoes','mensagem','status','conta_receber_id','data_pedido','criado_em','atualizado_em','cupom_codigo','desconto','subtotal'];
 
 function setupOrders() {
   return withLock_(() => {
@@ -1223,7 +1360,7 @@ function readOrders_() {
   if (!id) throw Error('Pedidos ainda não configurados.');
   const matrix = Utilities.parseCsv(DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, ''));
   const headers = matrix.shift() || [];
-  if (ORDER_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de pedidos.csv inválido.');
+  if (ORDER_COLUMNS_.filter(key => !['cupom_codigo','desconto','subtotal'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de pedidos.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key,index) => [key,row[index] || ''])));
 }
 function saveOrders_(rows) {
@@ -1255,7 +1392,29 @@ function cleanOrder_(input) {
   }).sort((a,b) => a.id-b.id);
   const centavos = itens.reduce((sum,item) => sum + Math.round(item.valor_unitario*100)*item.quantidade,0);
   if (centavos < 3000 || centavos > 99999999) throw Error('O pedido mínimo é R$ 30,00. Revise o total do carrinho.');
-  return {nome,email,whatsapp,entrega,endereco,cep,observacoes,itens,total:centavos/100};
+  const subtotalBrl = centavos / 100;
+
+  const cupomRaw = String(input.cupom_codigo || '').trim().toUpperCase();
+  let cupom_codigo = '';
+  let desconto = 0;
+  if (cupomRaw) {
+    try {
+      const coupons = readCoupons_();
+      const coupon = coupons.find(c => c.codigo.trim().toUpperCase() === cupomRaw);
+      if (coupon && coupon.status === 'ativo') {
+        const limit = Number(coupon.limite_usos || 1);
+        const uses = Number(coupon.usos_atuais || 0);
+        const today = brazilDate_();
+        const minVal = Number(coupon.valor_minimo || 0);
+        if ((limit <= 0 || uses < limit) && (!coupon.validade || coupon.validade >= today) && (minVal <= 0 || subtotalBrl >= minVal)) {
+          cupom_codigo = coupon.codigo;
+          desconto = Math.min(subtotalBrl, Math.max(0, Number(coupon.desconto_valor || 0)));
+        }
+      }
+    } catch (_) {}
+  }
+  const finalTotal = Math.max(0, subtotalBrl - desconto);
+  return {nome,email,whatsapp,entrega,endereco,cep,observacoes,itens,subtotal:subtotalBrl,cupom_codigo,desconto,total:finalTotal};
 }
 function orderMessage_(order) {
   const brl = value => 'R$ ' + Number(value).toFixed(2).replace('.', ',');
@@ -1268,6 +1427,10 @@ function orderMessage_(order) {
     if (item.slogan) message += '_' + item.slogan + '_\n';
     message += '       ' + brl(item.total) + '\n';
   });
+  if (order.desconto && Number(order.desconto) > 0) {
+    message += '\n*SUBTOTAL:* ' + brl(order.subtotal || (Number(order.total) + Number(order.desconto))) + '\n';
+    message += '*CUPOM:* ' + order.cupom_codigo + ' (- ' + brl(order.desconto) + ')\n';
+  }
   if (order.observacoes) message += '\n*OBSERVAÇÕES:*\n' + order.observacoes + '\n';
   return message + '\n-----------------------------------\n*TOTAL A PAGAR: ' + brl(order.total) + '*\n-----------------------------------\n_Aguardo confirmação, valor do frete e chave PIX. Frete a confirmar pela loja._';
 }
@@ -1281,6 +1444,23 @@ function finishOrder_(order, orders) {
   if (!finance.some(row => row.id === order.conta_receber_id)) {
     finance.push({id:order.conta_receber_id,descricao:'Pedido ' + order.numero,pessoa:order.nome,categoria:'Pedidos do site',valor:Number(order.total).toFixed(2),data_vencimento:order.data_pedido,data_pagamento:'',status:'pendente',observacoes:order.mensagem,cliente_id:order.cliente_id,pedido_id:order.id,criado_em:order.criado_em,atualizado_em:order.criado_em});
     saveFinanceRows_('receivables', finance);
+  }
+  if (order.cupom_codigo) {
+    try {
+      const coupons = readCoupons_();
+      const cIdx = coupons.findIndex(c => c.codigo.trim().toUpperCase() === String(order.cupom_codigo).trim().toUpperCase());
+      if (cIdx >= 0) {
+        const c = coupons[cIdx];
+        const newUses = Number(c.usos_atuais || 0) + 1;
+        c.usos_atuais = String(newUses);
+        const limit = Number(c.limite_usos || 1);
+        if (limit > 0 && newUses >= limit) c.status = 'utilizado';
+        c.atualizado_em = now_();
+        saveCouponRows_(coupons);
+      }
+    } catch (e) {
+      console.error('Erro ao atualizar uso do cupom:', e);
+    }
   }
   order.status = 'recebido'; order.atualizado_em = now_();
   saveOrders_(orders);
@@ -1303,7 +1483,7 @@ function placeOrder_(request) {
       const matches = clients.filter(row => normalizeEmail_(row.email) === input.email || phoneKey_(row.whatsapp) === input.whatsapp);
       if (matches.length > 1 || matches.length === 1 && (normalizeEmail_(matches[0].email) !== input.email || phoneKey_(matches[0].whatsapp) !== input.whatsapp)) throw Error('Os contatos informados precisam coincidir com seu cadastro. Confira e-mail e WhatsApp ou fale com a loja.');
       const stamp = now_(); const id = Utilities.getUuid();
-      order = {id,numero:'SOLO-' + today.replace(/-/g,'') + '-' + id.replace(/-/g,'').slice(0,8).toUpperCase(),chave_idempotencia:key,payload_hash:fingerprint,cliente_id:matches.length ? matches[0].id : Utilities.getUuid(),nome:input.nome,email:input.email,whatsapp:input.whatsapp,itens_json:JSON.stringify(input.itens),total:input.total.toFixed(2),entrega:input.entrega,endereco:input.endereco,cep:input.cep,observacoes:input.observacoes,mensagem:'',status:'processando',conta_receber_id:Utilities.getUuid(),data_pedido:today,criado_em:stamp,atualizado_em:stamp};
+      order = {id,numero:'SOLO-' + today.replace(/-/g,'') + '-' + id.replace(/-/g,'').slice(0,8).toUpperCase(),chave_idempotencia:key,payload_hash:fingerprint,cliente_id:matches.length ? matches[0].id : Utilities.getUuid(),nome:input.nome,email:input.email,whatsapp:input.whatsapp,itens_json:JSON.stringify(input.itens),total:input.total.toFixed(2),entrega:input.entrega,endereco:input.endereco,cep:input.cep,observacoes:input.observacoes,mensagem:'',status:'processando',conta_receber_id:Utilities.getUuid(),data_pedido:today,criado_em:stamp,atualizado_em:stamp,cupom_codigo:input.cupom_codigo || '',desconto:(input.desconto || 0).toFixed(2),subtotal:(input.subtotal || input.total).toFixed(2)};
       order.mensagem = orderMessage_(order);
       orders.push(order); saveOrders_(orders); // Journal persistente permite retomar gravações interrompidas.
     }

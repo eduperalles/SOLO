@@ -847,6 +847,30 @@
                 <input type="text" id="clientCep" placeholder="00000-000">
             </div>
 
+            <div class="form-group" id="couponGroup">
+                <label for="clientCoupon">Cupom de Desconto (Opcional)</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="clientCoupon" placeholder="Insira seu cupom" style="text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">
+                    <button type="button" id="btnApplyCoupon" onClick="applyCoupon()" class="btn" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; text-transform: uppercase; white-space: nowrap;">Aplicar</button>
+                </div>
+                <div id="couponFeedback" style="margin-top: 6px; font-size: 0.85rem; min-height: 18px;"></div>
+            </div>
+
+            <div class="form-group" id="checkoutOrderSummary" style="background: #fbfaf7; border: 1px solid #e5e0d6; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #666; margin-bottom: 4px;">
+                    <span>Subtotal:</span>
+                    <span id="summarySubtotal">R$ 0,00</span>
+                </div>
+                <div id="summaryCouponRow" style="display: none; justify-content: space-between; font-size: 0.85rem; color: var(--success); margin-bottom: 4px; font-weight: 600;">
+                    <span id="summaryCouponLabel">Desconto Cupom:</span>
+                    <span id="summaryCouponDiscount">- R$ 0,00</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 1rem; font-weight: 700; color: var(--primary); border-top: 1px solid #e5e0d6; padding-top: 6px; margin-top: 4px;">
+                    <span>Total a Pagar:</span>
+                    <span id="summaryTotal">R$ 0,00</span>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label>Observações (Opcional)</label>
                 <textarea id="clientObs" maxlength="2000" placeholder="Ex: Tirar a pimenta, embalar para presente..."></textarea>
@@ -1317,6 +1341,73 @@
             }
         }
 
+        let appliedCoupon = null;
+
+        function updateCheckoutSummary() {
+            const subtotal = cart.reduce((acc, item) => acc + (item.price * item.qtd), 0);
+            const discount = appliedCoupon ? Math.min(subtotal, Number(appliedCoupon.desconto_valor || 0)) : 0;
+            const finalTotal = Math.max(0, subtotal - discount);
+
+            const formatBrl = v => 'R$ ' + v.toFixed(2).replace('.', ',');
+            const subEl = document.getElementById('summarySubtotal');
+            const discRow = document.getElementById('summaryCouponRow');
+            const discEl = document.getElementById('summaryCouponDiscount');
+            const totEl = document.getElementById('summaryTotal');
+
+            if (subEl) subEl.textContent = formatBrl(subtotal);
+            if (discRow && discEl) {
+                if (discount > 0) {
+                    discRow.style.display = 'flex';
+                    discEl.textContent = '- ' + formatBrl(discount);
+                } else {
+                    discRow.style.display = 'none';
+                }
+            }
+            if (totEl) totEl.textContent = formatBrl(finalTotal);
+        }
+
+        async function applyCoupon() {
+            const input = document.getElementById('clientCoupon');
+            const btn = document.getElementById('btnApplyCoupon');
+            const feedback = document.getElementById('couponFeedback');
+            const code = (input?.value || '').trim().toUpperCase();
+            if (!code) {
+                if (feedback) { feedback.textContent = 'Informe o código do cupom.'; feedback.style.color = 'var(--danger)'; }
+                return;
+            }
+            if (btn) btn.disabled = true;
+            if (feedback) {
+                feedback.textContent = 'Validando cupom…';
+                feedback.style.color = 'var(--accent-gold)';
+            }
+
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qtd), 0);
+            try {
+                const res = await fetch(window.SOLO_API_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'text/plain;charset=utf-8'},
+                    body: JSON.stringify({ action: 'validateCoupon', codigo: code, subtotal })
+                });
+                const result = await res.json();
+                if (!result.ok) throw new Error(result.message || 'Cupom inválido.');
+                appliedCoupon = result.data;
+                if (feedback) {
+                    feedback.textContent = 'Cupom ' + appliedCoupon.codigo + ' aplicado! Desconto de R$ ' + Number(appliedCoupon.desconto_valor).toFixed(2).replace('.', ',');
+                    feedback.style.color = 'var(--success)';
+                }
+                updateCheckoutSummary();
+            } catch (err) {
+                appliedCoupon = null;
+                if (feedback) {
+                    feedback.textContent = err.message;
+                    feedback.style.color = 'var(--danger)';
+                }
+                updateCheckoutSummary();
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
         function openCheckoutModal() {
             if (cart.length === 0) return alert("Seu carrinho está vazio!");
             
@@ -1327,6 +1418,13 @@
                 document.getElementById('cartSidebar').classList.remove('open');
                 return;
             }
+
+            appliedCoupon = null;
+            const couponInput = document.getElementById('clientCoupon');
+            if (couponInput) couponInput.value = '';
+            const couponFeedback = document.getElementById('couponFeedback');
+            if (couponFeedback) { couponFeedback.textContent = ''; couponFeedback.style.color = ''; }
+            updateCheckoutSummary();
 
             document.getElementById('checkoutModal').style.display = 'flex';
             document.getElementById('cartSidebar').classList.remove('open');
@@ -1344,8 +1442,9 @@
                 endereco:document.getElementById('clientEndereco')?.value || '',
                 cep:document.getElementById('clientCep').value,
                 observacoes:document.getElementById('clientObs').value,
+                cupom_codigo: appliedCoupon ? appliedCoupon.codigo : '',
                 itens:cart.map(item => ({id:item.id,quantidade:item.qtd}))
-            }, () => { cart=[];renderCart();closeCheckoutModal(); });
+            }, () => { cart=[];appliedCoupon=null;renderCart();closeCheckoutModal(); });
         }
 
         // --- LÓGICA DO BISTRÔ ---
