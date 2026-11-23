@@ -12,8 +12,12 @@ const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuári
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
-function doGet() {
+function doGet(event) {
   const props = PropertiesService.getScriptProperties();
+  const action = event && event.parameter && event.parameter.action;
+  if (action === 'recordVisit' || action === 'getDailyVisits') {
+    return json_({ ok: true, data: handleDailyVisits_(action === 'recordVisit') });
+  }
   return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
@@ -27,10 +31,35 @@ function doPost(event) {
   }
 }
 
+function handleDailyVisits_(isRecord) {
+  const props = PropertiesService.getScriptProperties();
+  const today = Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'yyyy-MM-dd');
+  const lock = LockService.getScriptLock();
+  lock.tryLock(4000);
+  try {
+    const storedDate = props.getProperty('DAILY_VISITS_DATE') || '';
+    let count = Number(props.getProperty('DAILY_VISITS_COUNT') || 0);
+    if (storedDate !== today) {
+      count = 0;
+      props.setProperty('DAILY_VISITS_DATE', today);
+      props.setProperty('DAILY_VISITS_COUNT', '0');
+    }
+    if (isRecord) {
+      count += 1;
+      props.setProperty('DAILY_VISITS_COUNT', String(count));
+    }
+    return { count: count, date: today };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function dispatch_(request) {
-  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout','getSiteMenuData','submitBudgetRequest','validateCoupon'];
+  const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout','getSiteMenuData','submitBudgetRequest','validateCoupon','recordVisit','getDailyVisits'];
   const actor = publicActions.includes(request.action) ? null : auth_(request.token);
   switch (request.action) {
+    case 'recordVisit': return handleDailyVisits_(true);
+    case 'getDailyVisits': return handleDailyVisits_(false);
     case 'placeOrder': return placeOrder_(request);
     case 'validateCoupon': return validateCoupon_(request);
     case 'requestCustomerCode': return requestCustomerCode_(request);

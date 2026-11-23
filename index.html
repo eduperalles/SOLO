@@ -72,9 +72,18 @@
         /* --- Hero --- */
         .hero { 
             height: 100vh; 
-            background: url('bgground.png');
-            background-size: cover; background-position: center; background-attachment: fixed;
+            min-height: 520px;
+            background-image: url('bgground.png');
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: scroll;
             display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 1rem; 
+        }
+        @media (min-width: 769px) {
+            .hero {
+                background-attachment: fixed;
+            }
         }
         .hero-content { 
             max-width: 800px; animation: fadeUp 1s ease-out; background: rgba(255, 255, 255, 0.95);
@@ -316,13 +325,168 @@
         .clear-btn:hover { background: var(--danger); color: white; }
 
         /* --- Footer --- */
-        footer { background: var(--primary); padding: 4rem 5% 2rem; color: white; text-align: center; }
-        .footer-logo-container { margin-bottom: 1rem; display: inline-block; }
-        .footer-logo-img { height: 60px; filter: brightness(0) invert(1); opacity: 0.9; }
-        .socials { margin: 2rem 0; }
-        .socials a { color: #ccc; font-size: 1.5rem; margin: 0 1rem; transition: var(--transition); }
-        .socials a:hover { color: var(--accent-gold); }
-        footer p { color: #ccc; }
+        footer {
+            background: #111111;
+            padding: 4.5rem 5% 2rem;
+            color: white;
+            border-top: 1px solid rgba(212, 175, 55, 0.25);
+        }
+        .footer-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 2.5rem;
+            max-width: 1200px;
+            margin: 0 auto 3rem;
+            text-align: left;
+        }
+        .footer-col h4 {
+            color: var(--accent-gold);
+            font-size: 1.15rem;
+            margin-bottom: 1.2rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            font-weight: 700;
+        }
+        .footer-logo-container {
+            margin-bottom: 1rem;
+            display: inline-block;
+        }
+        .footer-logo-img {
+            height: 60px;
+            width: auto;
+            filter: brightness(0) invert(1);
+            opacity: 0.95;
+            display: block;
+        }
+        .footer-col p {
+            color: #b5b5b5;
+            font-size: 0.88rem;
+            line-height: 1.6;
+            margin-bottom: 0.8rem;
+        }
+        .footer-links {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+        .footer-links a {
+            color: #b5b5b5;
+            text-decoration: none;
+            font-size: 0.88rem;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .footer-links a:hover {
+            color: var(--accent-gold);
+            transform: translateX(3px);
+        }
+        .footer-contact-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            font-size: 0.88rem;
+            color: #b5b5b5;
+        }
+        .footer-contact-list li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .footer-contact-list i {
+            color: var(--accent-gold);
+            width: 16px;
+            text-align: center;
+        }
+        .socials {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.2rem;
+        }
+        .socials a {
+            color: #ddd;
+            font-size: 1.3rem;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.15);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+        .socials a:hover {
+            color: var(--primary);
+            background: var(--accent-gold);
+            border-color: var(--accent-gold);
+            transform: translateY(-2px);
+        }
+        .footer-counter-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            border-radius: 8px;
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .footer-counter-card .counter-label {
+            font-size: 0.82rem;
+            color: var(--accent-gold);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .footer-counter-card .counter-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .footer-counter-card .counter-value i {
+            font-size: 1.2rem;
+            color: var(--accent-gold);
+        }
+        .footer-counter-card .counter-reset {
+            font-size: 0.72rem;
+            color: #888;
+            line-height: 1.3;
+        }
+        .footer-bottom {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 1.8rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            font-size: 0.8rem;
+            color: #888;
+        }
+        .footer-bottom a {
+            color: var(--accent-gold);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+        .footer-bottom a:hover {
+            text-decoration: underline;
+        }
 
         /* --- Scroll Top --- */
         #scrollTopBtn { display: none; position: fixed; bottom: 30px; right: 30px; z-index: 999; border: none; outline: none; background-color: var(--accent-gold); color: white; cursor: pointer; padding: 15px; border-radius: 50%; font-size: 18px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); transition: var(--transition); }
@@ -330,7 +494,14 @@
 
         /* --- Responsive --- */
         @media (max-width: 768px) {
-            .hero h1 { font-size: 2.5rem; }
+            .hero {
+                background-attachment: scroll !important;
+                background-position: center center !important;
+                background-size: cover !important;
+                background-repeat: no-repeat !important;
+            }
+            .hero h1 { font-size: 2.3rem; }
+            .hero-content { padding: 2rem 1.2rem; }
             .nav-links { display: none; } 
             .mobile-menu-btn { display: block; }
             .about-grid, .bistro-grid { grid-template-columns: 1fr; }
@@ -341,6 +512,21 @@
             .delivery-options { flex-direction: column; gap: 0.5rem; }
             .bistro-grid { display: flex; flex-direction: column-reverse; } 
             .lightbox-content { width: 90%; } 
+            .footer-grid {
+                grid-template-columns: 1fr;
+                gap: 2rem;
+                text-align: center;
+            }
+            .footer-links, .footer-contact-list {
+                align-items: center;
+            }
+            .socials {
+                justify-content: center;
+            }
+            .footer-bottom {
+                flex-direction: column;
+                text-align: center;
+            }
         }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -524,7 +710,7 @@
 </head>
 <body>
 <div class="print-warning" style="display: none;">
-        <img src="https://ssgmoradadecaboclos.kinghost.net/SOLO/1.png" alt="SOLO Logo">
+        <img src="1.png" alt="SOLO Ateliê Artesanal Logo">
         <h2>Conteúdo Exclusivo<br>SOLO ATELIÊ ARTESANAL</h2>
     </div>
     
@@ -755,21 +941,55 @@
     </div>
 
 <footer id="contact">
-        <div class="footer-logo-container">
-             <img src="https://ssgmoradadecaboclos.kinghost.net/SOLO/1.png" alt="SOLO Ateliê Artesanal" class="footer-logo-img">
-        </div>
-        <p>Campinas, SP</p>
-        <div class="socials">
-            <a href="https://www.instagram.com/solo.atelieartesanal/"><i class="fab fa-instagram"></i></a>
-            <a href="https://wa.me/5519993835111?text=Ol%C3%A1%2C%20vim%20atrav%C3%A9s%20do%20Site%20da%20SOLO%20Ateli%C3%AA%20Artesanal%2C%20e%20gostaria%20de%20algumas%20informa%C3%A7%C3%B5es" target="_blank">
-    <i class="fab fa-whatsapp"></i></a>
+        <div class="footer-grid">
+            <div class="footer-col">
+                <div class="footer-logo-container">
+                    <img src="1.png" alt="SOLO Ateliê Artesanal" class="footer-logo-img">
+                </div>
+                <p>Gastronomia artesanal, pães de fermentação natural, charcutaria e momentos de presença em Campinas.</p>
+                <div class="socials">
+                    <a href="https://www.instagram.com/solo.atelieartesanal/" target="_blank" rel="noopener" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                    <a href="https://wa.me/5519993835111?text=Ol%C3%A1%2C%20vim%20atrav%C3%A9s%20do%20Site%20da%20SOLO%20Ateli%C3%AA%20Artesanal%2C%20e%20gostaria%20de%20algumas%20informa%C3%A7%C3%B5es" target="_blank" rel="noopener" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></a>
+                </div>
+            </div>
+
+            <div class="footer-col">
+                <h4>Navegação</h4>
+                <ul class="footer-links">
+                    <li><a href="#home">Início</a></li>
+                    <li><a href="#menu">Cardápio & Pronta Entrega</a></li>
+                    <li><a href="#kits-area">Monte sua Cesta</a></li>
+                    <li><a href="#about">Sobre o Ateliê</a></li>
+                    <li><a href="#bistro">O Bistrô</a></li>
+                    <li><a href="#estacao">Estação SOLO</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-col">
+                <h4>Atendimento</h4>
+                <ul class="footer-contact-list">
+                    <li><i class="fas fa-map-marker-alt"></i> Campinas - SP</li>
+                    <li><i class="fab fa-whatsapp"></i> (19) 99383-5111</li>
+                    <li><i class="fas fa-clock"></i> Terça a Domingo</li>
+                    <li><i class="fas fa-user-circle"></i> <a href="cliente/pedidos.html" style="color: inherit; text-decoration: underline;">Meus Pedidos</a></li>
+                    <li><i class="fas fa-lock"></i> <a href="admin/dashboard.html" style="color: inherit; text-decoration: underline;">Área Administrativa</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-col">
+                <h4>Visitas do Dia</h4>
+                <div class="footer-counter-card">
+                    <span class="counter-label"><i class="fas fa-chart-line"></i> Acessos Hoje</span>
+                    <span class="counter-value"><i class="fas fa-eye"></i> <span id="visits">...</span></span>
+                    <small class="counter-reset">Contador oficial diário · Reinicia diariamente às 00:00h</small>
+                </div>
+            </div>
         </div>
 
-        <div class="access-counter">
-            <i class="fas fa-eye"></i> <span id="visits">...</span> visitas
+        <div class="footer-bottom">
+            <span>&copy; 2026 SOLO Ateliê Artesanal. Todos os direitos reservados.</span>
+            <span>Desenvolvido com tecnologia por <a href="https://perally.com.br/" target="_blank" rel="noopener">PERALLY.TEC</a></span>
         </div>
-
-        <p style="font-size: 0.8rem;">&copy; 2026 SOLO. Desenvolvido por <a href="https://perally.com.br/">PERALLY.TEC</a></p>
     </footer>
 
     <button onClick="topFunction()" id="scrollTopBtn" title="Voltar ao topo"><i class="fas fa-arrow-up"></i></button>
@@ -949,7 +1169,7 @@
                 <i class="fas fa-times"></i>
             </button>
             
-            <img src="https://ssgmoradadecaboclos.kinghost.net/SOLO/1.png" alt="SOLO Logo" style="height: 80px; margin-bottom: 1.5rem;">
+            <img src="1.png" alt="SOLO Ateliê Artesanal Logo" style="height: 80px; margin-bottom: 1.5rem;">
             
             <h3 style="color: var(--primary); font-family: 'Cormorant Garamond', serif; font-size: 1.8rem; line-height: 1.2;">Conteúdo Exclusivo</h3>
             <h2 style="color: var(--accent-gold); margin-top: 0.5rem; font-size: 1.2rem; letter-spacing: 2px;">SOLO ATELIÊ ARTESANAL</h2>
@@ -1511,19 +1731,44 @@
         renderReadyMade(); 
         renderCustomCategories();
         
-        // --- CONTADOR DE VISITAS ---
-        const counterElement = document.getElementById('visits');
-        const siteID = 'solo_atelie_artesanal_2026';
+        // --- CONTADOR DE VISITAS DIÁRIAS (ZERA DIARIAMENTE ÀS 00:00H) ---
+        async function updateDailyVisits() {
+            const counterElement = document.getElementById('visits');
+            if (!counterElement) return;
 
-        fetch(`https://api.counterapi.dev/v1/${siteID}/visits/up`)
-            .then(response => response.json())
-            .then(data => {
-                counterElement.innerText = data.count;
-            })
-            .catch(err => {
-                console.error("Erro no contador:", err);
-                counterElement.innerText = "100+"; 
-            });
+            const now = new Date();
+            const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            const recordedSessionKey = 'solo_visit_recorded_' + todayStr;
+            const hasRecordedSession = sessionStorage.getItem(recordedSessionKey) === 'true';
+            const action = hasRecordedSession ? 'getDailyVisits' : 'recordVisit';
+
+            try {
+                let data = null;
+                if (window.SOLO_API_URL) {
+                    const res = await fetch(`${window.SOLO_API_URL}?action=${action}`, { method: 'GET' });
+                    const json = await res.json();
+                    if (json && json.ok && json.data) {
+                        data = json.data;
+                        sessionStorage.setItem(recordedSessionKey, 'true');
+                    }
+                }
+                if (data && typeof data.count === 'number') {
+                    counterElement.innerText = Number(data.count).toLocaleString('pt-BR');
+                    localStorage.setItem('solo_daily_visits_' + todayStr, String(data.count));
+                } else {
+                    throw new Error('Falha API - usando contador diário local');
+                }
+            } catch (err) {
+                let localCount = Number(localStorage.getItem('solo_daily_visits_' + todayStr) || 0);
+                if (!hasRecordedSession) {
+                    localCount += 1;
+                    localStorage.setItem('solo_daily_visits_' + todayStr, String(localCount));
+                    sessionStorage.setItem(recordedSessionKey, 'true');
+                }
+                counterElement.innerText = Math.max(1, localCount).toLocaleString('pt-BR');
+            }
+        }
+        updateDailyVisits();
     </script>
 </body>
 </html>
