@@ -16,6 +16,9 @@ assert.ok(!html.includes('https://ssgmoradadecaboclos.kinghost.net/SOLO/1.png'),
 assert.ok(html.includes('<img src="1.png" alt="SOLO Ateliê Artesanal" class="footer-logo-img">'), 'O rodapé deve carregar o logo local 1.png');
 assert.ok(html.includes('class="footer-grid"'), 'O rodapé deve possuir grid estruturado em colunas');
 assert.ok(html.includes('class="footer-col"'), 'O rodapé deve possuir colunas organizadas');
+assert.ok(html.includes('Segunda a Sexta'), 'Horário de atendimento deve ser Segunda a Sexta');
+assert.ok(!html.includes('Reinicia diariamente'), 'Não deve exibir texto sobre reinício do contador');
+assert.ok(html.includes('Acessos Hoje'), 'Deve exibir título Acessos Hoje no contador');
 
 // 3. Daily visit counter verification
 assert.ok(html.includes('updateDailyVisits'), 'index.html deve conter função updateDailyVisits');
