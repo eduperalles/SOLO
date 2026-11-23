@@ -28,7 +28,7 @@ assert.throws(()=>run("saveCoupon_(operator, {}, 'create')"), /permiss/);
 // 2. Leitura inicial vazia
 assert.equal(run('readCoupons_().length'), 0);
 
-// 3. Criação de cupom de desconto de R$ 20,00
+// 3. Criação de cupom de desconto de 20%
 const couponInput = {
   codigo: 'BEMVINDO20',
   desconto_valor: '20.00',
@@ -43,6 +43,14 @@ const couponInput = {
 run(`var input = ${JSON.stringify(couponInput)}; var cupom = saveCoupon_(admin, input, 'create');`);
 assert.equal(run('cupom.codigo'), 'BEMVINDO20');
 assert.equal(run('cupom.desconto_valor'), '20.00');
+assert.equal(run('cupom.tipo'), 'percentual');
+for (const value of [0, -1, 100.01, Infinity, 'abc', 0.001]) {
+  context.badDiscount = value;
+  assert.throws(() => run("saveCoupon_(admin, {...input, desconto_valor:badDiscount}, 'create')"), /porcentagem/);
+}
+assert.equal(run("couponDiscount_({tipo:'percentual',desconto_valor:'12.5'}, 99.99)"), 12.5);
+assert.equal(run("couponDiscount_({tipo:'percentual',desconto_valor:'100'}, 98)"), 98);
+assert.equal(run("couponDiscount_({tipo:'valor_fixo',desconto_valor:'20'}, 80)"), 20);
 assert.equal(run('cupom.valor_minimo'), '50.00');
 assert.equal(run('cupom.limite_usos'), '1');
 assert.equal(run('cupom.usos_atuais'), '0');
@@ -59,12 +67,13 @@ assert.throws(()=>run("validateCoupon_({codigo:'BEMVINDO20', subtotal:40})"), /m
 // Cupom inexistente -> erro
 assert.throws(()=>run("validateCoupon_({codigo:'NAOEXISTE', subtotal:100})"), /não encontrado/);
 
-// Cupom válido com subtotal R$ 80 -> desconto R$ 20 -> total R$ 60
+// Cupom válido com subtotal R$ 80 -> desconto de 20% = R$ 16
 const validation = run("validateCoupon_({codigo:'bemvindo20', subtotal:80})");
 assert.equal(validation.valid, true);
 assert.equal(validation.codigo, 'BEMVINDO20');
-assert.equal(validation.desconto_valor, 20);
-assert.equal(validation.total_com_desconto, 60);
+assert.equal(validation.desconto_valor, 16);
+assert.equal(validation.desconto_percentual, 20);
+assert.equal(validation.total_com_desconto, 64);
 
 // 6. Teste de pedido utilizando o cupom de desconto
 const orderRequest = {
@@ -81,10 +90,12 @@ const orderRequest = {
 };
 
 const placed = run(`placeOrder_(${JSON.stringify(orderRequest)})`);
-// Total original: R$ 98.00. Desconto: R$ 20.00. Total final com cupom: R$ 78.00!
-assert.equal(placed.total, 78);
-assert.ok(placed.mensagem.includes('*CUPOM:* BEMVINDO20 (- R$ 20,00)'));
-assert.ok(placed.mensagem.includes('TOTAL A PAGAR: R$ 78,00'));
+// O servidor calcula o desconto sobre o preço real do catálogo.
+const catalogTotal = run('ORDER_CATALOG_.find(p => p.id === 103).centavos / 100');
+const expectedDiscount = Math.round(catalogTotal * 20) / 100;
+assert.equal(placed.total, catalogTotal - expectedDiscount);
+assert.ok(placed.mensagem.includes('*CUPOM:* BEMVINDO20 (- R$ ' + expectedDiscount.toFixed(2).replace('.', ',') + ')'));
+assert.equal(run("Number(readFinance_('receivables')[0].valor)"), placed.total);
 
 // 7. Cupom com limite de 1 uso agora deve constar como utilizado!
 const usedCoupon = run("readCoupons_().find(c => c.codigo === 'BEMVINDO20')");

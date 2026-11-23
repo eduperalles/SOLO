@@ -1322,11 +1322,12 @@
       const statusBadge = c.status === 'utilizado' ? 'inactive' : c.status === 'ativo' ? '' : 'gold';
       const client = clients.find(item => item.id === c.cliente_id);
       const phone = client ? client.whatsapp : '';
-      const waText = `Olá${c.cliente_nome ? `, ${c.cliente_nome}` : ''}! Aqui está o seu cupom de desconto exclusivo no valor de ${money(c.desconto_valor)} da SOLO Ateliê: *${c.codigo}*. Aproveite em nosso site: https://soloatelie.com.br`;
+      const discountLabel = c.tipo === 'percentual' ? `${Number(c.desconto_valor).toLocaleString('pt-BR')}%` : money(c.desconto_valor);
+      const waText = `Olá${c.cliente_nome ? `, ${c.cliente_nome}` : ''}! Aqui está o seu cupom exclusivo de ${discountLabel} de desconto da SOLO Ateliê: *${c.codigo}*. Aproveite em nosso site: https://soloatelie.com.br`;
       const waLink = phone ? `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(waText)}` : `https://wa.me/?text=${encodeURIComponent(waText)}`;
       return `<tr>
         <td><div style="display:flex;align-items:center;gap:6px;"><code style="font-size:13px;font-weight:700;letter-spacing:1px;background:#f0ece4;padding:3px 7px;border-radius:4px;">${escapeHtml(c.codigo)}</code><button class="tiny-button" type="button" data-copy-coupon="${escapeHtml(c.codigo)}" title="Copiar código">Copiar</button></div></td>
-        <td><b style="color:var(--success);font-size:13px;">${money(c.desconto_valor)}</b></td>
+        <td><b style="color:var(--success);font-size:13px;">${escapeHtml(discountLabel)}</b></td>
         <td>${Number(c.valor_minimo) > 0 ? money(c.valor_minimo) : '<span class="helper">Sem mínimo</span>'}</td>
         <td><b>${escapeHtml(c.cliente_nome || 'Qualquer cliente')}</b></td>
         <td><span>${escapeHtml(c.usos_atuais || '0')} / ${escapeHtml(c.limite_usos || '1')}</span></td>
@@ -1346,7 +1347,7 @@
 
     <!-- PAINEL 1: CADASTRO / EDIÇÃO -->
     <section class="content-card users-tab-panel" data-coupons-panel="editor" ${couponsTab === 'editor' ? '' : 'hidden'}>
-      <div class="card-head"><div><h2>${current ? 'Editar cupom' : 'Cadastrar cupom'}</h2><p>Gere cupons com valor de desconto para compras no site e envie diretamente aos clientes.</p></div></div>
+      <div class="card-head"><div><h2>${current ? 'Editar cupom' : 'Cadastrar cupom'}</h2><p>Gere cupons com desconto em porcentagem para compras no site e envie diretamente aos clientes.</p></div></div>
       <form id="coupon-form" class="editor">
         <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
         <input type="hidden" name="expected_updated_at" value="${escapeHtml(current?.atualizado_em || '')}">
@@ -1362,7 +1363,7 @@
           <small class="helper">O código que o cliente digitará no checkout do site.</small>
         </div>
 
-        <div class="field"><label for="coupon-discount">Valor do Desconto (R$) *</label><input id="coupon-discount" name="desconto_valor" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.desconto_valor)*100) : '')}" placeholder="0,00" required><small class="helper">Valor que será subtraído do total do pedido.</small></div>
+        <div class="field"><label for="coupon-discount">Desconto (%) *</label><input id="coupon-discount" name="desconto_valor" type="number" inputmode="decimal" min="0.01" max="100" step="0.01" value="${escapeHtml(current?.tipo === 'percentual' ? current.desconto_valor : '')}" placeholder="Ex: 15" required><small class="helper">Porcentagem sobre o subtotal dos produtos, de 0,01% a 100%.${current && current.tipo !== 'percentual' ? ` Este cupom antigo oferece ${money(current.desconto_valor)}; informe a porcentagem para convertê-lo ao salvar.` : ''}</small></div>
         <div class="field"><label for="coupon-min-order">Pedido Mínimo (R$)</label><input id="coupon-min-order" name="valor_minimo" type="text" inputmode="decimal" value="${escapeHtml(current && Number(current.valor_minimo) > 0 ? maskCurrency(Number(current.valor_minimo)*100) : '0,00')}" placeholder="0,00"><small class="helper">Valor mínimo do carrinho para validar o cupom (opcional).</small></div>
 
         <div class="field"><label for="coupon-limit">Limite de Utilizações</label><input id="coupon-limit" name="limite_usos" type="number" min="1" max="9999" value="${escapeHtml(current?.limite_usos || '1')}" required><small class="helper">Padrão 1 para uso único.</small></div>
@@ -1401,9 +1402,7 @@
       if (couponsTab === 'list') document.querySelector('#coupons-search')?.focus();
     }));
 
-    const discountInput = document.querySelector('#coupon-discount');
     const minInput = document.querySelector('#coupon-min-order');
-    discountInput?.addEventListener('input', event => event.target.value = maskCurrency(event.target.value));
     minInput?.addEventListener('input', event => event.target.value = maskCurrency(event.target.value));
 
     document.querySelector('#find-coupon-client')?.addEventListener('click', openCouponClientPicker);
@@ -1434,7 +1433,8 @@
         id: fd.get('id') || '',
         expected_updated_at: fd.get('expected_updated_at') || '',
         codigo: String(fd.get('codigo') || '').trim().toUpperCase(),
-        desconto_valor: parseCurrency(fd.get('desconto_valor')),
+        desconto_valor: Number(String(fd.get('desconto_valor')).replace(',', '.')),
+        tipo: 'percentual',
         valor_minimo: parseCurrency(fd.get('valor_minimo')) || '0.00',
         limite_usos: fd.get('limite_usos') || '1',
         cliente_id: fd.get('cliente_id') || '',

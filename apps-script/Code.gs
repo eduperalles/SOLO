@@ -553,6 +553,12 @@ function saveCouponRows_(rows) {
   file.setContent(csv_(COUPON_COLUMNS_, rows));
 }
 
+function couponDiscount_(coupon, subtotal) {
+  const value = Math.max(0, Number(coupon.desconto_valor) || 0);
+  const amount = coupon.tipo === 'percentual' ? subtotal * Math.min(100, value) / 100 : value;
+  return Math.min(subtotal, Math.round(amount * 100) / 100);
+}
+
 function validateCoupon_(request) {
   const codigo = String(request.codigo || '').trim().toUpperCase();
   const subtotal = Math.max(0, Number(request.subtotal) || 0);
@@ -576,12 +582,14 @@ function validateCoupon_(request) {
     throw Error('Este cupom exige pedido mínimo de ' + brl(minVal) + '.');
   }
 
-  const desconto = Math.min(subtotal, Math.max(0, Number(coupon.desconto_valor || 0)));
+  const desconto = couponDiscount_(coupon, subtotal);
   const total = Math.max(0, subtotal - desconto);
 
   return {
     valid: true,
     codigo: coupon.codigo,
+    tipo: coupon.tipo || 'valor_fixo',
+    desconto_percentual: coupon.tipo === 'percentual' ? Number(coupon.desconto_valor) : null,
     desconto_valor: desconto,
     valor_minimo: minVal,
     total_com_desconto: total
@@ -596,7 +604,7 @@ function saveCoupon_(actor, input, operation) {
     codigo = ('SOLO-' + Utilities.getUuid().replace(/-/g, '').slice(0, 6)).toUpperCase();
   }
   const desconto_valor = Math.max(0, Number(String(input.desconto_valor ?? '0').replace(',', '.')) || 0);
-  const tipo = String(input.tipo || 'valor_fixo');
+  const tipo = 'percentual';
   const valor_minimo = Math.max(0, Number(String(input.valor_minimo ?? '0').replace(',', '.')) || 0);
   const cliente_id = String(input.cliente_id || '').trim();
   const cliente_nome = String(input.cliente_nome || '').trim();
@@ -605,7 +613,7 @@ function saveCoupon_(actor, input, operation) {
   const status = input.status === 'inativo' || input.status === false ? 'inativo' : 'ativo';
 
   if (codigo.length < 3 || codigo.length > 30) throw Error('O código do cupom deve ter de 3 a 30 caracteres alfanuméricos.');
-  if (desconto_valor <= 0) throw Error('O valor do desconto deve ser maior que zero.');
+  if (!Number.isFinite(desconto_valor) || desconto_valor < 0.01 || desconto_valor > 100) throw Error('O desconto deve ser uma porcentagem entre 0,01% e 100%.');
   if (validade && !isFinanceDate_(validade)) throw Error('Informe uma data de validade válida.');
 
   return withLock_(() => {
@@ -1437,7 +1445,7 @@ function cleanOrder_(input) {
         const minVal = Number(coupon.valor_minimo || 0);
         if ((limit <= 0 || uses < limit) && (!coupon.validade || coupon.validade >= today) && (minVal <= 0 || subtotalBrl >= minVal)) {
           cupom_codigo = coupon.codigo;
-          desconto = Math.min(subtotalBrl, Math.max(0, Number(coupon.desconto_valor || 0)));
+          desconto = couponDiscount_(coupon, subtotalBrl);
         }
       }
     } catch (_) {}
