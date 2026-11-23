@@ -145,7 +145,38 @@
     button.setAttribute('aria-expanded', String(expanded));
     document.querySelector('#registrations-items').hidden = !expanded;
   });
-  document.querySelector('#mobile-menu').addEventListener('click', () => document.querySelector('#sidebar').classList.toggle('open'));
+
+  const sidebarEl = document.querySelector('#sidebar');
+  const menuToggleEl = document.querySelector('#mobile-menu');
+  const sidebarCloseEl = document.querySelector('#sidebar-close');
+  const sidebarBackdropEl = document.querySelector('#sidebar-backdrop');
+  let isSidebarOpen = false;
+
+  function setSidebarOpen(open) {
+    isSidebarOpen = Boolean(open);
+    if (sidebarEl) {
+      sidebarEl.classList.toggle('open', isSidebarOpen);
+      sidebarEl.setAttribute('aria-hidden', String(!isSidebarOpen));
+    }
+    if (menuToggleEl) {
+      menuToggleEl.setAttribute('aria-expanded', String(isSidebarOpen));
+      menuToggleEl.setAttribute('aria-label', isSidebarOpen ? 'Fechar menu' : 'Abrir menu');
+    }
+    if (sidebarBackdropEl) {
+      sidebarBackdropEl.hidden = !isSidebarOpen;
+    }
+    document.body.classList.toggle('menu-open', isSidebarOpen);
+  }
+
+  if (menuToggleEl) menuToggleEl.addEventListener('click', () => setSidebarOpen(!isSidebarOpen));
+  if (sidebarCloseEl) sidebarCloseEl.addEventListener('click', () => { setSidebarOpen(false); menuToggleEl?.focus(); });
+  if (sidebarBackdropEl) sidebarBackdropEl.addEventListener('click', () => { setSidebarOpen(false); menuToggleEl?.focus(); });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && isSidebarOpen && !document.querySelector('dialog[open]')) {
+      setSidebarOpen(false);
+      menuToggleEl?.focus();
+    }
+  });
 
   function paintIdentity(photo = profilePhoto) {
     document.querySelector('#user-name').textContent = user?.nome || 'Usuário';
@@ -178,7 +209,7 @@
     document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','products','coupons','site_menu'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
     document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'products' ? 'Produtos' : page === 'coupons' ? 'Cupons' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
-    document.querySelector('#sidebar').classList.remove('open');
+    setSidebarOpen(false);
     if (page === 'dashboard') void loadDashboardPage();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
