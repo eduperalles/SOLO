@@ -54,3 +54,7 @@ const escapeHtml=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;',
 const report=browser.window.SoloKits.reportHtml({titulo:'Kit <script>alert(1)</script>',descricao:'Teste & montagem',atualizado_em:'2026-11-24T10:00:00Z',foto_url:'/solo_afeto.jpg',itens:[{nome:'Queijo <Brie>',quantidade:100,unidade_medida:'g',quantidade_base:1,unidade_base:'kg',preco_custo:80,preco_venda:120,custo:8,venda:12}],preco_custo:8,preco_venda:12,lucro:4,margem_lucro:33.33},{e:escapeHtml,money:value=>'R$ '+Number(value).toFixed(2)});
 assert.ok(report.includes('Kit &lt;script&gt;'));assert.ok(!report.includes('<script>'));assert.ok(report.includes('Queijo &lt;Brie&gt;'));assert.ok(report.includes('100 g'));assert.ok(report.includes('A4 landscape'));assert.ok(report.includes('R$ 8.00'));assert.ok(report.includes('Foto') || report.includes('img src'));
 console.log('PASS: printable report escaping, photo, composition, quantities and totals.');
+
+run("var compatibility=saveProduct_(admin,{nome:'Compatibilidade',quantidade:500,unidade_medida:'g',preco_custo:10,preco_venda:20},'create');var oldPayload={...compatibility,expected_updated_at:compatibility.atualizado_em};delete oldPayload.quantidade;delete oldPayload.unidade_medida;compatibility=saveProduct_(admin,oldPayload,'update');");
+assert.equal(run('compatibility.quantidade'),500);assert.equal(run('compatibility.unidade_medida'),'g');
+console.log('PASS: older product forms preserve the registered quantity and unit.');

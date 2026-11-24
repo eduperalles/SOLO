@@ -445,8 +445,8 @@ function saveProduct_(actor, input, operation) {
   const id = String(input.id || '');
   const nome = String(input.nome || '').trim();
   const categoria = String(input.categoria || 'Geral').trim();
-  const quantidade = Number(String(input.quantidade ?? 1).replace(',', '.'));
-  const unidade_medida = String(input.unidade_medida || 'un');
+  let quantidade = Number(String(input.quantidade ?? 1).replace(',', '.'));
+  let unidade_medida = String(input.unidade_medida || 'un');
   if (!Number.isFinite(quantidade) || quantidade <= 0 || quantidade > 1000000) throw Error('Informe uma quantidade maior que zero e até 1.000.000.');
   if (!Object.prototype.hasOwnProperty.call(MEASURE_UNITS_,unidade_medida)) throw Error('Unidade de medida inválida.');
   const fornecedor_id = String(input.fornecedor_id || '').trim();
@@ -472,6 +472,8 @@ function saveProduct_(actor, input, operation) {
     const old = rows[index];
     if (operation === 'update' && !old) throw Error('Produto não encontrado.');
     if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Produto atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+    if (old && input.quantidade === undefined) quantidade = old.quantidade || 1;
+    if (old && input.unidade_medida === undefined) unidade_medida = old.unidade_medida || 'un';
 
     let foto_arquivo_id = old ? (old.foto_arquivo_id || '') : '';
     if (input.foto_data_url) {
