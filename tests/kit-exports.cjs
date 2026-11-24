@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');const ExcelJS=require('../assets/vendor/exceljs-4.4.0.min.js');
+global.window={};global.document={currentScript:{src:'https://soloatelie.com.br/assets/kit-reports.js'}};
+vm.runInThisContext(fs.readFileSync('assets/kit-tools.js','utf8'));vm.runInThisContext(fs.readFileSync('assets/kits.js','utf8'));require('../assets/kit-reports.js');
+const products=[{id:'cheese',nome:'Brie <Especial>',status:'ativo',quantidade:1,unidade_medida:'kg',preco_custo:80,preco_venda:120},{id:'juice',nome:'Suco',status:'ativo',quantidade:1,unidade_medida:'l',preco_custo:10,preco_venda:20}];
+const kit=(titulo,descricao,items)=>({titulo,descricao,atualizado_em:'2026-11-24T12:00:00Z',foto_url:'/solo_afeto.jpg',...window.SoloKitTools.calculate(items,products)});
+const rows=[kit('Kit Café & Afeto','Café com carinho',[{produto_id:'cheese',quantidade:100,unidade_medida:'g'},{produto_id:'juice',quantidade:250,unidade_medida:'ml'}]),kit('Kit Festa','Para celebrar',[{produto_id:'cheese',quantidade:200,unidade_medida:'g'}])];
+(async()=>{
+ const filtered=window.SoloKits.filterKits(rows,'  CAFÉ ');assert.equal(filtered.length,1);assert.equal(window.SoloKits.filterKits(rows,'carinho').length,1);assert.equal(window.SoloKits.filterKits(rows,'inexistente').length,0);
+ const html=window.SoloKitReports.printHtml(filtered,{filter:'café'});assert.ok(html.includes('Kit Café &amp; Afeto'));assert.ok(!html.includes('Kit Festa'));assert.ok(html.includes('100 g'));assert.ok(html.includes('Brie &lt;Especial&gt;'));assert.ok(html.includes('break-after:page'));assert.ok(html.includes('Busca: café'));assert.ok(window.SoloKitReports.printHtml([]).includes('Nenhum kit encontrado'));
+ const allHtml=window.SoloKitReports.printHtml(rows);assert.equal((allHtml.match(/class="kit-export-page"/g)||[]).length,2);
+ const book=window.SoloKitReports.buildWorkbook(ExcelJS,filtered,{filter:'café'}),buffer=await book.xlsx.writeBuffer();fs.writeFileSync('.verification/kits-export-fixture.xlsx',buffer);
+ const loaded=new ExcelJS.Workbook();await loaded.xlsx.load(buffer);assert.equal(loaded.worksheets.length,2);const summary=loaded.getWorksheet('Kits'),detail=loaded.getWorksheet('Composição');
+ assert.equal(summary.getCell('A8').value,'Kit Café & Afeto');assert.equal(summary.getCell('D8').value.result,10.5);assert.equal(summary.getCell('E8').value.result,17);assert.equal(summary.getCell('F8').value.result,6.5);assert.equal(summary.getCell('D8').value.formula,"SUM('Composição'!J8:J9)");assert.equal(detail.getCell('I8').value.result,0.1);assert.equal(detail.getCell('I9').value.result,0.25);assert.equal(detail.getCell('J8').value.result,8);assert.equal(detail.getCell('K9').value.result,5);assert.equal(summary.views[0].ySplit,7);assert.equal(summary.autoFilter,'A7:H8');assert.ok(summary.getCell('D8').numFmt.includes('R$'));
+ assert.equal(window.SoloKitReports.buildWorkbook(ExcelJS,[]).worksheets.length,2);
+ const source=fs.readFileSync('assets/kits.js','utf8');assert.ok(source.includes('kits-print'));assert.ok(source.includes('kits-excel'));assert.ok(source.includes('found=filterKits(kits,query)'));
+ console.log('PASS: kit search/export parity, filtered multi-kit PDF with photos/composition, Excel summary/detail formulas, unit conversion, cached values, formats, freeze/filter, empty results and lazy loading integration.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -93,6 +93,8 @@
       paintAccess();paintIdentity();
     }
   });
+  let blockingApiCount=0;
+  const livePanel=window.SoloLivePanel.mount({isBusy:()=>blockingApiCount>0,refresh:async page=>{if(page==='dashboard')await loadDashboardPage({background:true});else if(page==='orders')await loadOrdersPage({background:true});}});
   async function api(action, payload = {}, options = {}) {
     if (!API) throw new Error('API administrativa não configurada.');
     const titles = {
@@ -134,6 +136,7 @@
       listFinanceReceivables:'Carregando contas a receber',
       listFinancePayables:'Carregando contas a pagar'
     };
+    if(!options.silent)blockingApiCount++;
     const finishLoading = options.silent ? null : window.SoloLoading?.start(titles[action] || 'Salvando informações');
     try {
       const data = await panelTransport.request(action,payload);
@@ -142,12 +145,13 @@
     } catch (error) {
       await finishLoading?.(false);
       throw error;
-    }
+    } finally {if(!options.silent)blockingApiCount=Math.max(0,blockingApiCount-1);}
   }
   const avatarMarkup = (person, className = '', photo = '') => `<span class="avatar ${className}">${photo
     ? `<img src="${escapeHtml(photo)}" alt="Foto de ${escapeHtml(person?.nome || 'usuário')}">`
     : escapeHtml(initials(person?.nome))}</span>`;
   function clearSession() {
+    livePanel.dispose();
     sessionStorage.removeItem('solo_session');
     sessionStorage.removeItem('solo_user');
     location.replace('../login.html');
@@ -221,6 +225,7 @@
       return;
     }
     activePage = page;
+    livePanel.setPage(page);
     if (['users','clients','suppliers','products','kits','coupons','site_menu'].includes(page)) {
       document.querySelector('#registrations-items').hidden = false;
       document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
@@ -253,27 +258,18 @@
     return Array.from(years).sort().reverse();
   }
 
-  async function loadDashboardPage() {
-    dashboardData = {receivables:[],payables:[],clients:[],orders:[]};
-    workspace.innerHTML = '<div class="workspace-state">Carregando visão geral…</div>';
+  async function loadDashboardPage({background=false}={}) {
+    const nextData={receivables:[],payables:[],clients:[],orders:[]};let nextStats;
+    if(!background)workspace.innerHTML='<div class="workspace-state">Carregando visão geral…</div>';
     try {
-      const promises = [];
-      promises.push(api('getDashboardStats').then(res => {dashboardStats=res;}));
-      if (canAccess('finance')) {
-        promises.push(api('listFinanceReceivables').then(res => { dashboardData.receivables = res; }).catch(() => {}));
-        promises.push(api('listFinancePayables').then(res => { dashboardData.payables = res; }).catch(() => {}));
-      }
-      if (canAccess('clients')) {
-        promises.push(api('listClients').then(res => { dashboardData.clients = res; }).catch(() => {}));
-      }
-      if (canAccess('orders')) {
-        promises.push(api('listOrders').then(res => { dashboardData.orders = res; }).catch(() => {}));
-      }
-      await Promise.all(promises);
-      if (activePage === 'dashboard') renderDashboard();
-    } catch (error) {
-      if (activePage === 'dashboard') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
-    }
+      const options={silent:background};
+      const promises=[api('getDashboardStats',{},options).then(result=>{nextStats=result;})];
+      if(canAccess('finance')){promises.push(api('listFinanceReceivables',{},options).then(result=>nextData.receivables=result));promises.push(api('listFinancePayables',{},options).then(result=>nextData.payables=result));}
+      if(canAccess('clients'))promises.push(api('listClients',{},options).then(result=>nextData.clients=result));
+      if(canAccess('orders'))promises.push(api('listOrders',{},options).then(result=>nextData.orders=result));
+      await Promise.all(promises);if(activePage!=='dashboard')return;
+      dashboardData=nextData;dashboardStats=nextStats;renderDashboard();
+    }catch(error){if(background)throw error;if(activePage==='dashboard')workspace.innerHTML=`<div class="workspace-state">${escapeHtml(error.message)}</div>`;}
   }
 
   function dashFinanceCardMarkup() {
@@ -708,12 +704,13 @@
     const number = digits.length === 10 || digits.length === 11 ? '55' + digits : digits;
     return `https://wa.me/${number}`;
   }
-  async function loadOrdersPage() {
-    workspace.innerHTML='<div class="workspace-state">Carregando pedidos…</div>';
+  async function loadOrdersPage({background=false}={}) {
+    if(!background)workspace.innerHTML='<div class="workspace-state">Carregando pedidos…</div>';
     try {
-      const orders=await api('listOrders');
+      const orders=await api('listOrders',{}, {silent:background});
       if(activePage !== 'orders')return;
-      window.SoloOrderView.render(workspace,orders,{admin:true,onRetry:async id=>{try {await api('retryOrder',{id});await loadOrdersPage();toast('Gravação concluída.');}catch(error){toast(error.message,true);}},onDelete:async order=>{
+      const oldSearch=workspace.querySelector('#orders-search'),query=oldSearch?.value || '',focused=document.activeElement===oldSearch,selection=focused ? oldSearch.selectionStart : null;
+      window.SoloOrderView.render(workspace,orders,{admin:true,query,onRetry:async id=>{try {await api('retryOrder',{id});await loadOrdersPage();toast('Gravação concluída.');}catch(error){toast(error.message,true);}},onDelete:async order=>{
         if(!confirm(`Excluir o pedido ${order.numero}?\n\nA conta a receber vinculada também será excluída, caso exista. Esta ação não pode ser desfeita.`))return;
         try {
           const result=await api('deleteOrder',{id:order.id});
@@ -724,7 +721,9 @@
           toast(error.message,true);
         }
       }});
-    }catch(error){if(activePage==='orders')workspace.innerHTML=`<div class="workspace-state">${escapeHtml(error.message)}</div>`;}
+      if(focused){const input=workspace.querySelector('#orders-search');input.focus({preventScroll:true});if(selection!==null)input.setSelectionRange(selection,selection);}
+      livePanel.observeOrders(orders);
+    }catch(error){if(background)throw error;if(activePage==='orders')workspace.innerHTML=`<div class="workspace-state">${escapeHtml(error.message)}</div>`;}
   }
 
   async function loadClientsPage() {
@@ -827,17 +826,28 @@
       if (activePage === 'suppliers') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
     }
   }
-  function supplierRows(filter = '') {
+  function safeSupplierWebsite(value) {
+    try {const url=new URL(String(value || ''));return ['http:','https:'].includes(url.protocol) ? url.href : '';} catch(_){return '';}
+  }
+  function supplierStars(value,id='') {
+    const score=Math.max(0,Math.min(5,Number(value)||0));
+    return `<div class="supplier-stars" role="group" aria-label="Avaliação do fornecedor">${[1,2,3,4,5].map(star=>`<button type="button" class="star-button ${star<=score ? 'selected' : ''}" ${id ? `data-rating-supplier="${escapeHtml(id)}"` : 'data-form-star'} data-rating-value="${star}" aria-pressed="${star<=score}" aria-label="Avaliar com ${star} ${star===1 ? 'estrela' : 'estrelas'}">★</button>`).join('')}<small>${score}/5</small></div>`;
+  }
+  function filteredSuppliers(filter='') {
     const query = filter.trim().toLocaleLowerCase('pt-BR');
     const digits = query.replace(/\D/g,'');
-    const visible = suppliers.filter(item => `${item.fornecedor} ${item.email} ${formatWhatsapp(item.whatsapp)} ${item.cidade} ${item.uf} ${item.endereco} ${item.tipo_produto} ${item.observacoes}`.toLocaleLowerCase('pt-BR').includes(query) || (digits.length >= 3 && /^[+\d() .-]+$/.test(query) && item.whatsapp.includes(digits)));
+    return suppliers.filter(item => `${item.fornecedor} ${item.email} ${formatWhatsapp(item.whatsapp)} ${item.cidade} ${item.uf} ${item.endereco} ${item.tipo_produto} ${item.observacoes} ${item.website || ''}`.toLocaleLowerCase('pt-BR').includes(query) || (digits.length >= 3 && /^[+\d() .-]+$/.test(query) && item.whatsapp.includes(digits)));
+  }
+  function supplierRows(filter = '') {
+    const visible=filteredSuppliers(filter);
     if (!visible.length) return '<div class="empty">Nenhum fornecedor encontrado.</div>';
-    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Fornecedor</th><th>Contato</th><th>Localização</th><th>Produto fornecido</th><th>Ações</th></tr></thead><tbody>${visible.map(item => `<tr>
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Fornecedor</th><th>Contato</th><th>Localização</th><th>Produto fornecido</th><th>Avaliação</th><th>Ações</th></tr></thead><tbody>${visible.map(item => `<tr>
       <td><b>${escapeHtml(item.fornecedor)}</b>${item.observacoes ? `<small class="order-contact" title="${escapeHtml(item.observacoes)}">${escapeHtml(item.observacoes.length > 55 ? item.observacoes.slice(0,52) + '…' : item.observacoes)}</small>` : ''}</td>
       <td>${escapeHtml(item.email)}<small class="order-contact"><a class="whatsapp-cell-link" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar no WhatsApp">${whatsappSvg}<span>${escapeHtml(formatWhatsapp(item.whatsapp))}</span></a></small></td>
       <td><span>${escapeHtml(item.cidade ? `${item.cidade}/${item.uf}` : item.uf || '—')}</span><small class="order-contact">${escapeHtml(item.endereco || '—')}</small></td>
       <td><span class="badge">${escapeHtml(item.tipo_produto || 'Geral')}</span></td>
-      <td><div class="row-actions"><a class="tiny-button whatsapp" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar com ${escapeHtml(item.fornecedor)} no WhatsApp">${whatsappSvg} WhatsApp</a><button class="tiny-button" type="button" data-supplier-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-supplier-delete="${escapeHtml(item.id)}">Excluir</button></div></td>
+      <td>${supplierStars(item.avaliacao,item.id)}</td>
+      <td><div class="row-actions">${safeSupplierWebsite(item.website) ? `<a class="tiny-button" href="${escapeHtml(safeSupplierWebsite(item.website))}" target="_blank" rel="noopener noreferrer">🌐 Website</a>` : ''}<a class="tiny-button whatsapp" href="${escapeHtml(whatsappUrl(item.whatsapp))}" target="_blank" rel="noopener noreferrer" title="Falar com ${escapeHtml(item.fornecedor)} no WhatsApp">${whatsappSvg} WhatsApp</a><button class="tiny-button" type="button" data-supplier-edit="${escapeHtml(item.id)}">Editar</button><button class="tiny-button danger" type="button" data-supplier-delete="${escapeHtml(item.id)}">Excluir</button></div></td>
     </tr>`).join('')}</tbody></table></div>`;
   }
   function renderSuppliers() {
@@ -854,6 +864,8 @@
           <div class="field"><label for="supplier-email">E-mail</label><input id="supplier-email" name="email" type="email" maxlength="254" autocomplete="email" value="${escapeHtml(current?.email || '')}" placeholder="fornecedor@exemplo.com.br" required></div>
           <div class="field"><label for="supplier-whatsapp">WhatsApp</label><input id="supplier-whatsapp" name="whatsapp" type="tel" maxlength="24" autocomplete="tel" placeholder="(11) 99999-9999" value="${escapeHtml(formatWhatsapp(current?.whatsapp || ''))}" required><small class="helper">Informe o DDD com 10 a 11 dígitos.</small></div>
           <div class="field full"><label for="supplier-product">Tipo de produto fornecido</label><input id="supplier-product" name="tipo_produto" maxlength="180" value="${escapeHtml(current?.tipo_produto || '')}" placeholder="Ex: Queijos artesanais, Frios, Pães, Embalagens" required></div>
+          <div class="field"><label for="supplier-website">Website</label><input id="supplier-website" name="website" type="text" inputmode="url" maxlength="500" value="${escapeHtml(current?.website || '')}" placeholder="https://www.fornecedor.com.br"></div>
+          <div class="field"><label>Avaliação do fornecedor</label><input type="hidden" name="avaliacao" value="${escapeHtml(current?.avaliacao || '0')}"><div id="supplier-form-stars">${supplierStars(current?.avaliacao)}</div><small class="helper">Clique em até 5 estrelas. Clique na nota atual para limpar.</small></div>
           <div class="field full"><label for="supplier-address">Endereço</label><input id="supplier-address" name="endereco" maxlength="250" value="${escapeHtml(current?.endereco || '')}" placeholder="Rua, número, complemento, bairro"></div>
           <div class="field"><label for="supplier-city">Cidade</label><input id="supplier-city" name="cidade" maxlength="100" value="${escapeHtml(current?.cidade || '')}" placeholder="Cidade"></div>
           <div class="field"><label for="supplier-uf">UF</label><select id="supplier-uf" name="uf"><option value="">Selecione o estado</option>${UF_LIST.map(uf => `<option value="${uf}" ${(current?.uf || 'SP') === uf ? 'selected' : ''}>${uf}</option>`).join('')}</select></div>
@@ -861,10 +873,13 @@
           <div class="form-actions"><button class="button button-secondary" type="reset">Limpar</button><button class="button" type="submit">Salvar fornecedor</button></div>
         </form></section>
       <section class="content-card users-tab-panel" data-suppliers-panel="list" ${suppliersTab === 'list' ? '' : 'hidden'}>
-        <div class="card-head"><div><h2>Fornecedores cadastrados</h2><p>${suppliers.length} registros disponíveis</p></div><div class="toolbar"><input id="suppliers-search" aria-label="Buscar fornecedores" placeholder="Buscar fornecedores…"></div></div>
+        <div class="card-head"><div><h2>Fornecedores cadastrados</h2><p>${suppliers.length} registros disponíveis</p></div><div class="toolbar"><div class="product-export-actions"><button type="button" class="tiny-button" id="suppliers-print">▤ Imprimir / PDF</button><button type="button" class="tiny-button" id="suppliers-excel">▦ Exportar Excel (.xlsx)</button><input id="suppliers-search" aria-label="Buscar fornecedores" placeholder="Buscar fornecedores…"></div></div></div>
         <div id="suppliers-table">${supplierRows()}</div></section>`;
     const form = document.querySelector('#supplier-form');
     const search = document.querySelector('#suppliers-search');
+    const bindFormStars=()=>form.querySelectorAll('[data-form-star]').forEach(button=>button.onclick=()=>{const value=Number(button.dataset.ratingValue);form.elements.avaliacao.value=Number(form.elements.avaliacao.value)===value ? 0 : value;form.querySelector('#supplier-form-stars').innerHTML=supplierStars(form.elements.avaliacao.value);bindFormStars();});bindFormStars();
+    for(const [id,kind] of [['suppliers-print','print'],['suppliers-excel','xlsx']])workspace.querySelector('#'+id).onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{const filter=search.value.trim(),rows=filteredSuppliers(filter),reports=await loadSupplierReports();await reports[kind](rows,{filter});}catch(error){toast(error.message,true);}finally{button.disabled=false;}};
+
     workspace.querySelectorAll('[data-suppliers-tab]').forEach(button => button.addEventListener('click', () => {
       suppliersTab = button.dataset.suppliersTab;
       workspace.querySelectorAll('[data-suppliers-tab]').forEach(tab => { const active = tab.dataset.suppliersTab === suppliersTab; tab.classList.toggle('active',active); tab.setAttribute('aria-selected',String(active)); });
@@ -893,7 +908,20 @@
     search.addEventListener('input', () => { document.querySelector('#suppliers-table').innerHTML = supplierRows(search.value); bindSupplierActions(); });
     bindSupplierActions();
   }
+  let supplierReportsPromise;
+  function loadSupplierReports() {
+    if(window.SoloSupplierReports)return Promise.resolve(window.SoloSupplierReports);
+    if(!supplierReportsPromise)supplierReportsPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='../assets/supplier-reports.js?v=20261124-live-panel';script.onload=()=>resolve(window.SoloSupplierReports);script.onerror=()=>{supplierReportsPromise=null;script.remove();reject(Error('Não foi possível carregar a exportação dos fornecedores.'));};document.head.append(script);});
+    return supplierReportsPromise;
+  }
   function bindSupplierActions() {
+    workspace.querySelectorAll('[data-rating-supplier]').forEach(button=>button.onclick=async()=>{
+      const selected=suppliers.find(item=>item.id===button.dataset.ratingSupplier);if(!selected)return;
+      const group=button.closest('.supplier-stars');group.querySelectorAll('button').forEach(item=>item.disabled=true);
+      try{const score=Number(button.dataset.ratingValue);const saved=await api('updateSupplier',{record:{...selected,avaliacao:Number(selected.avaliacao)===score ? 0 : score,expected_updated_at:selected.atualizado_em}});suppliers=suppliers.map(item=>item.id===saved.id ? saved : item);if(activePage==='suppliers'){const search=workspace.querySelector('#suppliers-search');workspace.querySelector('#suppliers-table').innerHTML=supplierRows(search?.value || '');bindSupplierActions();}toast('Avaliação salva.');}
+      catch(error){toast(error.message,true);group.querySelectorAll('button').forEach(item=>item.disabled=false);}
+    });
+
     workspace.querySelectorAll('[data-supplier-edit]').forEach(button => button.addEventListener('click', () => {
       editingSupplierId = button.dataset.supplierEdit; suppliersTab = 'editor'; renderSuppliers();
       workspace.querySelector('.content-card')?.scrollIntoView({behavior:'smooth'});

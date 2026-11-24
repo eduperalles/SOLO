@@ -2,7 +2,7 @@ const DRIVE_FOLDER_ID_ = '1uDmZGpSEbeUq1PX_MvU-7nYW4Y4IpFva';
 const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status','foto_arquivo_id','foto_atualizada_em','criado_em','atualizado_em'];
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em','cliente_id','pedido_id'];
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
-const SUPPLIER_COLUMNS_ = ['id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
+const SUPPLIER_COLUMNS_ = ['website','avaliacao','id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
 const PRODUCT_COLUMNS_ = ['quantidade','unidade_medida','id','nome','categoria','fornecedor_id','fornecedor_nome','preco_custo','preco_venda','margem_lucro','foto_arquivo_id','descricao','status','criado_em','atualizado_em'];
 const COUPON_COLUMNS_ = ['id','codigo','desconto_valor','tipo','valor_minimo','cliente_id','cliente_nome','limite_usos','usos_atuais','validade','status','criado_em','atualizado_em'];
 const MENU_CONFIG_COLUMNS_ = ['id','menu_titulo','secao_titulo','secao_subtitulo','ativo','atualizado_em'];
@@ -18,7 +18,7 @@ function doGet(event) {
   if (action === 'recordVisit' || action === 'getDailyVisits') {
     return json_({ ok: true, data: handleDailyVisits_(action === 'recordVisit') });
   }
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,panelReads:1,kits:1,productMeasures:1,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,panelReads:1,supplierDetails:1,kits:1,productMeasures:1,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -344,8 +344,8 @@ function readSuppliers_() {
   const text = file.getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (SUPPLIER_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de fornecedores.csv inválido.');
-  return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
+  if (SUPPLIER_COLUMNS_.filter(key=>!['website','avaliacao'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de fornecedores.csv inválido.');
+  return matrix.filter(row => row.some(Boolean)).map(row => ({website:'',avaliacao:'0',...Object.fromEntries(headers.map((key, index) => [key,row[index] || '']))}));
 }
 
 function saveSupplierRows_(rows) {
@@ -381,8 +381,11 @@ function saveSupplier_(actor, input, operation) {
     const old = rows[index];
     if (operation === 'update' && !old) throw Error('Fornecedor não encontrado.');
     if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Fornecedor atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+    const website=cleanSupplierWebsite_(input.website === undefined ? old?.website : input.website);
+    const avaliacao=Number(input.avaliacao === undefined ? (old?.avaliacao || 0) : input.avaliacao);
+    if(!Number.isInteger(avaliacao) || avaliacao < 0 || avaliacao > 5) throw Error('A avaliação deve ser de 0 a 5 estrelas.');
     const stamp = now_();
-    const record = {id:old ? old.id : Utilities.getUuid(),fornecedor,email,whatsapp,endereco,cidade,uf,tipo_produto,observacoes,criado_em:old ? old.criado_em : stamp,atualizado_em:stamp};
+    const record = {website,avaliacao:String(avaliacao),id:old ? old.id : Utilities.getUuid(),fornecedor,email,whatsapp,endereco,cidade,uf,tipo_produto,observacoes,criado_em:old ? old.criado_em : stamp,atualizado_em:stamp};
     if (old) rows[index] = record; else rows.push(record);
     saveSupplierRows_(rows);
     return record;
@@ -1794,4 +1797,11 @@ function getDriveInventory_(actor) {
     rows.push({name,property:propertyById[file.getId()] || '',bytes,status:bytes===null ? 'unavailable' : 'ok'});
   }
   return rows.sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+function cleanSupplierWebsite_(value) {
+  let url=String(value || '').trim();if(!url)return '';
+  if(!/^[a-z][a-z0-9+.-]*:/i.test(url))url='https://'+url;
+  if(url.length>500 || !/^https?:\/\/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^\s<>"']*)?$/i.test(url))throw Error('Informe um website válido com http:// ou https://.');
+  return url;
 }

@@ -1,5 +1,12 @@
 (() => {
   const tools = window.SoloKitTools;
+  const filterKits = (rows,query='') => {const text=String(query).trim().toLocaleLowerCase('pt-BR');return rows.filter(kit=>`${kit.titulo} ${kit.descricao}`.toLocaleLowerCase('pt-BR').includes(text));};
+  let exportsPromise;
+  function loadExports() {
+    if(window.SoloKitReports)return Promise.resolve(window.SoloKitReports);
+    if(!exportsPromise)exportsPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='../assets/kit-reports.js?v=20261124-kit-exports';script.onload=()=>resolve(window.SoloKitReports);script.onerror=()=>{exportsPromise=null;script.remove();reject(Error('Não foi possível carregar a exportação dos kits. Tente novamente.'));};document.head.append(script);});
+    return exportsPromise;
+  }
   const number = value => Number(value).toLocaleString('pt-BR',{maximumFractionDigits:3});
   async function mount({api,workspace,toast,escapeHtml:e,money,readAndResizeImage,isActive}) {
     let selectedProductId='';
@@ -83,11 +90,16 @@
       composition();
     }
     function records(back=()=>editor()) {
-      workspace.innerHTML=`<div class="users-tabs" role="tablist" aria-label="Cadastro de kits"><button type="button" class="users-tab" role="tab" aria-selected="false" id="kit-back">Cadastro / edição</button><button type="button" class="users-tab active" role="tab" aria-selected="true">Registros <span>${kits.length}</span></button></div><section class="content-card"><div class="card-head"><div><h2>Kits cadastrados</h2><p>Fichas de montagem com composição e preços da última gravação.</p></div><div class="toolbar"><input type="search" id="kit-search" aria-label="Buscar kits" placeholder="Buscar kits…"></div></div><div id="kit-records"></div></section>`;
+      workspace.innerHTML=`<div class="users-tabs" role="tablist" aria-label="Cadastro de kits"><button type="button" class="users-tab" role="tab" aria-selected="false" id="kit-back">Cadastro / edição</button><button type="button" class="users-tab active" role="tab" aria-selected="true">Registros <span>${kits.length}</span></button></div><section class="content-card"><div class="card-head"><div><h2>Kits cadastrados</h2><p>Fichas de montagem com composição e preços da última gravação.</p></div><div class="toolbar"><div class="product-export-actions"><button type="button" class="tiny-button" id="kits-print">▤ Imprimir / PDF</button><button type="button" class="tiny-button" id="kits-excel">▦ Exportar Excel (.xlsx)</button><input type="search" id="kit-search" aria-label="Buscar kits" placeholder="Buscar kits…"></div></div></div><div id="kit-records"></div></section>`;
       workspace.querySelector('#kit-back').onclick=back;
+      for(const [id,kind] of [['kits-print','print'],['kits-excel','xlsx']])workspace.querySelector('#'+id).onclick=async event=>{
+        const button=event.currentTarget;button.disabled=true;
+        try{const query=workspace.querySelector('#kit-search').value.trim(),found=filterKits(kits,query),reports=await loadExports();await reports[kind](found,{filter:query});}
+        catch(error){toast(error.message,true);}finally{button.disabled=false;}
+      };
       const render=()=>{
         const query=workspace.querySelector('#kit-search').value.trim().toLocaleLowerCase('pt-BR');
-        const found=kits.filter(kit=>`${kit.titulo} ${kit.descricao}`.toLocaleLowerCase('pt-BR').includes(query));
+        const found=filterKits(kits,query);
         workspace.querySelector('#kit-records').innerHTML=found.length ? `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Kit</th><th>Composição</th><th>Custo total</th><th>Venda total</th><th>Margem</th><th>Ações</th></tr></thead><tbody>${found.map(kit=>`<tr><td><div class="kit-record-title">${kit.foto_url ? `<img src="${e(kit.foto_url)}" alt="" class="table-product-thumb">` : ''}<b>${e(kit.titulo)}</b></div></td><td>${kit.itens.map(item=>`${number(item.quantidade)} ${e(item.unidade_medida)} · ${e(item.nome)}`).join('<br>')}</td><td>${money(kit.preco_custo)}</td><td><b>${money(kit.preco_venda)}</b></td><td>${number(kit.margem_lucro)}%</td><td><div class="row-actions"><button class="tiny-button" data-kit-print="${e(kit.id)}">Imprimir kit</button><button class="tiny-button" data-kit-edit="${e(kit.id)}">Editar</button><button class="tiny-button danger" data-kit-delete="${e(kit.id)}">Excluir</button></div></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum kit encontrado.</div>';
         workspace.querySelectorAll('[data-kit-edit]').forEach(button=>button.onclick=()=>{
           editing=kits.find(kit=>kit.id===button.dataset.kitEdit);
@@ -122,5 +134,5 @@
     dialog.querySelector('#kit-print-close').onclick=()=>dialog.close();
     dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
   }
-  window.SoloKits={mount,reportHtml};
+  window.SoloKits={mount,reportHtml,filterKits};
 })();

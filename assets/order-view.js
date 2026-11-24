@@ -21,7 +21,7 @@
       dialog.querySelector('pre').textContent=order.mensagem;
       dialog.querySelector('button').addEventListener('click',()=>dialog.close());dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();
     });
-    paint('');
+    const initialQuery=String(options.query || '');container.querySelector('#orders-search').value=initialQuery;paint(initialQuery);
   }
   window.SoloOrderView={render};
 })();
