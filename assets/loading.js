@@ -49,7 +49,6 @@
       done = true;
       if (success) {
         paint(100, title);
-        await new Promise(resolve => setTimeout(resolve, 170));
       }
       state.active = Math.max(0, state.active - 1);
       if (!state.active) {

@@ -64,6 +64,8 @@
     if (!digits) return '';
     return new Intl.NumberFormat('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Number(digits) / 100);
   }
+  let dashboardStats = {users:null,kits:null,products:null,modules:0};
+  let driveFiles = null;
   let dashboardData = { receivables: [], payables: [], clients: [], orders: [] };
   let dashFinanceYear = String(new Date().getFullYear());
   let dashFinanceType = 'all';
@@ -77,9 +79,26 @@
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => toastNode.classList.remove('show'), 3400);
   };
-  async function api(action, payload = {}) {
+  const panelTransport = window.SoloPanelApi.create({
+    async send(action,payload) {
+      const response=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,action,token})});
+      const result=await response.json();
+      if(!result.ok) throw Error(result.message || 'Falha ao processar a solicitação.');
+      return result.data;
+    },
+    onUser(current) {
+      if(!current) return;
+      user=current;
+      sessionStorage.setItem('solo_user',JSON.stringify(user));
+      paintAccess();paintIdentity();
+    }
+  });
+  async function api(action, payload = {}, options = {}) {
     if (!API) throw new Error('API administrativa não configurada.');
     const titles = {
+      getDashboardStats:'Carregando indicadores',
+      getDriveInventory:'Consultando arquivos do Drive',
+      panelBootstrap:'Carregando painel',
       validateSession:'Validando acesso',
       listUsers:'Carregando usuários',
       listClients:'Carregando clientes',
@@ -115,17 +134,11 @@
       listFinanceReceivables:'Carregando contas a receber',
       listFinancePayables:'Carregando contas a pagar'
     };
-    const finishLoading = window.SoloLoading?.start(titles[action] || 'Salvando informações');
+    const finishLoading = options.silent ? null : window.SoloLoading?.start(titles[action] || 'Salvando informações');
     try {
-      const response = await fetch(API, {
-        method: 'POST',
-        headers: {'Content-Type':'text/plain;charset=utf-8'},
-        body: JSON.stringify({action, token, ...payload})
-      });
-      const result = await response.json();
-      if (!result.ok) throw new Error(result.message || 'Falha ao processar a solicitação.');
+      const data = await panelTransport.request(action,payload);
       await finishLoading?.();
-      return result.data;
+      return data;
     } catch (error) {
       await finishLoading?.(false);
       throw error;
@@ -191,16 +204,17 @@
   }
   async function loadOwnPhoto() {
     if (!user?.has_photo) return '';
-    const result = await api('getMyProfilePhoto');
+    const result = await api('getMyProfilePhoto',{}, {silent:true});
     profilePhoto = String(result.photo_data_url || '');
+    userPhotos.set(user.id,profilePhoto);
     paintIdentity();
+    if(activePage === 'dashboard') {const avatar=workspace.querySelector('.welcome .avatar');if(avatar)avatar.innerHTML=`<img src="${escapeHtml(profilePhoto)}" alt="Foto do perfil">`;}
     return profilePhoto;
   }
 
   let navigationVersion = 0;
   async function navigate(page) {
     const version = ++navigationVersion;
-    try { user = await api('validateSession'); paintAccess(); } catch (error) { toast(error.message, true); return; }
     if (version !== navigationVersion) return;
     if (!canAccess(page)) {
       workspace.innerHTML = '<div class="workspace-state">Sem permissão para acessar este módulo.</div>';
@@ -240,10 +254,11 @@
   }
 
   async function loadDashboardPage() {
+    dashboardData = {receivables:[],payables:[],clients:[],orders:[]};
     workspace.innerHTML = '<div class="workspace-state">Carregando visão geral…</div>';
     try {
       const promises = [];
-      promises.push(api('listUsers').then(res => { users = res; }).catch(() => {}));
+      promises.push(api('getDashboardStats').then(res => {dashboardStats=res;}));
       if (canAccess('finance')) {
         promises.push(api('listFinanceReceivables').then(res => { dashboardData.receivables = res; }).catch(() => {}));
         promises.push(api('listFinancePayables').then(res => { dashboardData.payables = res; }).catch(() => {}));
@@ -459,16 +474,17 @@
 
   function renderDashboard() {
     const admin = user?.perfil === 'admin';
-    const userCount = admin ? users.length : 1;
+    const statCard=(label,value,icon,page)=>`<button type="button" class="stat dashboard-stat" ${page && canAccess(page) ? `data-dashboard-page="${page}"` : 'disabled'}><span class="stat-icon" aria-hidden="true">${icon}</span><span>${label}</span><strong>${value === null ? '—' : value}</strong>${page && canAccess(page) ? '<small>Abrir cadastro ↗</small>' : '<small>Resumo do acesso</small>'}</button>`;
     workspace.innerHTML = `
       <section class="welcome">
         ${avatarMarkup(user, '', profilePhoto)}
         <div><h2>Olá, ${escapeHtml(user?.nome || 'equipe SOLO')}.</h2><p>Gerencie usuários, clientes e acompanhe o financeiro do SOLO.</p></div>
       </section>
-      <div class="stats">
-        <div class="stat"><span>Usuários cadastrados</span><strong>${userCount}</strong></div>
-        <div class="stat"><span>Módulos ativos</span><strong>${Object.values(user?.access || {}).filter(Boolean).length}</strong></div>
-        <div class="stat"><span>Próxima etapa</span><strong style="font-size:18px">Em definição</strong></div>
+      <div class="stats dashboard-stats">
+        ${statCard('Usuários cadastrados',dashboardStats.users,'♙','users')}
+        ${statCard('Módulos ativos',dashboardStats.modules,'◈','')}
+        ${statCard('Kits cadastrados',dashboardStats.kits,'▣','kits')}
+        ${statCard('Produtos cadastrados',dashboardStats.products,'🏷','products')}
       </div>
       <div class="dashboard-charts-grid" id="dashboard-charts">
         ${dashFinanceCardMarkup()}
@@ -476,6 +492,7 @@
         ${dashOrdersCardMarkup()}
       </div>`;
     bindDashboardFilters();
+    workspace.querySelectorAll('[data-dashboard-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.dashboardPage)));
   }
 
   const searchIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>';
@@ -515,94 +532,10 @@
                 <th>Tipo</th>
                 <th>Descrição do conteúdo</th>
                 <th>Propriedade de Script</th>
+                <th>Tamanho</th>
               </tr>
             </thead>
-            <tbody>
-              <tr>
-                <td><b>usuarios.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Cadastro de usuários da equipe SOLO, perfis (Administrador/Operador), status e senhas criptografadas (PBKDF2/HMAC-SHA256).</td>
-                <td><code>USERS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>configuracoes.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Controle granular de permissões e acessos por módulo (Visão geral, Usuários, Clientes, Pedidos, Financeiro) para cada operador.</td>
-                <td><code>SETTINGS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>clientes.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Cadastro de clientes da SOLO com nome completo, e-mail, WhatsApp (com DDD) e data de cadastro.</td>
-                <td><code>CLIENTS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>fornecedores.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Cadastro de fornecedores da SOLO com fornecedor, e-mail, WhatsApp, endereço, cidade, UF, tipo de produto e observações.</td>
-                <td><code>SUPPLIERS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>produtos.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Cadastro de produtos amarrado a fornecedores, com preço de custo, preço de venda, cálculo de margem e fotos.</td>
-                <td><code>PRODUCTS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>cupons.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Cadastro de cupons de desconto para compras no site com código, valor, destinatário e controle de uso.</td>
-                <td><code>COUPONS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>fotos-produtos</b></td>
-                <td><span class="badge">Pasta</span></td>
-                <td>Pasta pública no Google Drive para armazenamento das fotos dos produtos do catálogo da SOLO.</td>
-                <td><code>PRODUCTS_PHOTOS_FOLDER_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>menu_site_config.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Configurações do item de menu e seção dinâmica do site (título do menu, título da seção, subtítulo e status ativo).</td>
-                <td><code>MENU_CONFIG_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>menu_site_cards.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Cards dinâmicos com título, descrição, galeria de fotos e ordem para apresentação no site.</td>
-                <td><code>MENU_CARDS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>fotos-menu-site</b></td>
-                <td><span class="badge">Pasta</span></td>
-                <td>Pasta pública no Google Drive para armazenamento das fotos (até 3 por card) dos cards dinâmicos do site.</td>
-                <td><code>MENU_PHOTOS_FOLDER_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>pedidos.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Pedidos realizados pelo catálogo do site e portal do cliente, com itens JSON, valor total, entrega, chave de idempotência e hash.</td>
-                <td><code>ORDERS_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>contas_receber.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Contas a receber do módulo financeiro, lançamentos avulsos e vínculos automáticos com pedidos recebidos.</td>
-                <td><code>RECEIVABLES_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>contas_pagar.csv</b></td>
-                <td><span class="badge">CSV</span></td>
-                <td>Contas a pagar do módulo financeiro, fornecedores, categorias de despesas, datas de vencimento e pagamentos.</td>
-                <td><code>PAYABLES_FILE_ID</code></td>
-              </tr>
-              <tr>
-                <td><b>fotos-perfil</b></td>
-                <td><span class="badge">Pasta</span></td>
-                <td>Subpasta privada para armazenamento seguro das fotos de perfil dos usuários em formato PNG/JPEG recortadas.</td>
-                <td><code>PHOTO_FOLDER_ID</code></td>
-              </tr>
-            </tbody>
+            <tbody id="drive-files-table">${driveInventoryRows()}</tbody>
           </table>
         </div>
 
@@ -670,6 +603,7 @@
 
     workspace.querySelectorAll('[data-settings-tab]').forEach(button => button.addEventListener('click', () => {
       settingsTab = button.dataset.settingsTab;
+      if(settingsTab === 'drive') void loadDriveInventory();
       workspace.querySelectorAll('[data-settings-tab]').forEach(tab => {
         const active = tab.dataset.settingsTab === settingsTab;
         tab.classList.toggle('active', active);
@@ -682,6 +616,20 @@
 
     document.querySelector('#find-access-user')?.addEventListener('click', openUserPicker);
     if (selectedAccess) renderAccessEditor();
+    if(settingsTab === 'drive') void loadDriveInventory();
+  }
+  function driveInventoryRows() {
+    if(!driveFiles) return '<tr><td colspan="5" class="empty">Consultando tamanhos dos arquivos CSV…</td></tr>';
+    if(!driveFiles.length) return '<tr><td colspan="5" class="empty">Nenhum CSV encontrado na pasta do projeto.</td></tr>';
+    const descriptions={'usuarios.csv':'Usuários e acesso à equipe','configuracoes.csv':'Permissões por módulo','clientes.csv':'Clientes cadastrados','fornecedores.csv':'Fornecedores cadastrados','produtos.csv':'Produtos, quantidades, unidades e preços','kits.csv':'Kits e fichas de montagem','cupons.csv':'Cupons e controle de uso','menu_site_config.csv':'Configuração do menu do site','menu_site_cards.csv':'Cards do site','pedidos.csv':'Pedidos realizados','contas_receber.csv':'Contas a receber','contas_pagar.csv':'Contas a pagar'};
+    return driveFiles.map(file=>{const size=file.bytes===null ? 'Indisponível' : file.bytes < 1024 ? `${file.bytes.toLocaleString('pt-BR')} B` : `${(file.bytes/1024).toLocaleString('pt-BR',{maximumFractionDigits:2})} KiB`;return `<tr><td><b>${escapeHtml(file.name)}</b></td><td><span class="badge">CSV</span></td><td>${escapeHtml(descriptions[file.name] || 'Tabela do projeto')}</td><td><code>${escapeHtml(file.property || '—')}</code></td><td title="${file.bytes===null ? '' : escapeHtml(file.bytes+' bytes')}"><b>${size}</b></td></tr>`;}).join('');
+  }
+  async function loadDriveInventory() {
+    const table=workspace.querySelector('#drive-files-table');
+    if(!table) return;
+    table.innerHTML='<tr><td colspan="5" class="empty">Consultando tamanhos dos arquivos CSV…</td></tr>';
+    try {const result=await api('getDriveInventory',{}, {silent:true});driveFiles=result;if(activePage === 'settings' && workspace.querySelector('#drive-files-table')) workspace.querySelector('#drive-files-table').innerHTML=driveInventoryRows();}
+    catch(error){if(activePage === 'settings' && workspace.querySelector('#drive-files-table')) workspace.querySelector('#drive-files-table').innerHTML=`<tr><td colspan="5" class="empty">${escapeHtml(error.message)}</td></tr>`;}
   }
   function openUserPicker() {
     const dialog = document.createElement('dialog');
@@ -1009,7 +957,7 @@
     try {
       const [prodRes, supRes] = await Promise.all([
         api('listProducts'),
-        api('listSuppliers').catch(() => [])
+        canAccess('suppliers') ? api('listSuppliers') : Promise.resolve([])
       ]);
       if (activePage !== 'products') return;
       products = prodRes || [];
@@ -1108,14 +1056,26 @@
 
     <!-- PAINEL 2: LISTA DE PRODUTOS -->
     <section class="content-card users-tab-panel" data-prods-panel="list" ${productsTab === 'list' ? '' : 'hidden'}>
-      <div class="card-head"><div><h2>Produtos cadastrados</h2><p>${products.length} produtos disponíveis</p></div><div class="toolbar"><input id="prods-search" aria-label="Buscar produtos" placeholder="Buscar produtos…"></div></div>
+      <div class="card-head"><div><h2>Produtos cadastrados</h2><p>${products.length} produtos disponíveis</p></div><div class="toolbar"><div class="product-export-actions"><button type="button" class="tiny-button" id="products-print">▤ Imprimir / PDF</button><button type="button" class="tiny-button" id="products-excel">▦ Exportar Excel (.xlsx)</button><input id="prods-search" aria-label="Buscar produtos" placeholder="Buscar produtos…"></div></div></div>
       <div id="prods-table">${productRows()}</div>
     </section>`;
 
     bindProductActions();
   }
 
+  let productReportsPromise;
+  function loadProductReports() {
+    if(window.SoloProductReports) return Promise.resolve(window.SoloProductReports);
+    if(!productReportsPromise) productReportsPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='../assets/product-reports.js?v=20261124-fast-panel';script.onload=()=>resolve(window.SoloProductReports);script.onerror=()=>{productReportsPromise=null;script.remove();reject(Error('Não foi possível carregar o relatório. Tente novamente.'));};document.head.append(script);});
+    return productReportsPromise;
+  }
   function bindProductActions() {
+    for(const [id,kind] of [['products-print','print'],['products-excel','xlsx']]) document.querySelector('#'+id)?.addEventListener('click',async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try {const query=String(document.querySelector('#prods-search')?.value || '').trim();const found=products.filter(p=>`${p.nome} ${p.categoria} ${p.fornecedor_nome} ${p.descricao}`.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')));const reports=await loadProductReports();await reports[kind](found,{filter:query});}
+      catch(error){toast(error.message,true);}finally{button.disabled=false;}
+    });
+
     workspace.querySelectorAll('[data-prods-tab]').forEach(btn => btn.addEventListener('click', () => {
       productsTab = btn.dataset.prodsTab;
       workspace.querySelectorAll('[data-prods-tab]').forEach(tab => {
@@ -1313,7 +1273,7 @@
     try {
       const [coupRes, cliRes] = await Promise.all([
         api('listCoupons').catch(() => []),
-        api('listClients').catch(() => [])
+        canAccess('clients') ? api('listClients') : Promise.resolve([])
       ]);
       if (activePage !== 'coupons') return;
       coupons = coupRes || [];
@@ -1798,10 +1758,11 @@
     workspace.innerHTML = '<div class="workspace-state">Carregando usuários…</div>';
     try {
       users = await api('listUsers');
+      if(activePage !== 'users') return;
       renderUsers();
       void hydrateUserPhotos(users);
     } catch (error) {
-      workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+      if(activePage === 'users') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
       if (/sessão|session|autentic/i.test(error.message)) clearSession();
     }
   }
@@ -1925,10 +1886,11 @@
         api('listFinanceReceivables'),
         api('listFinancePayables')
       ]);
+      if(activePage !== 'finance') return;
       financeRows = {receivables, payables};
       renderFinance();
     } catch (error) {
-      workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
+      if(activePage === 'finance') workspace.innerHTML = `<div class="workspace-state">${escapeHtml(error.message)}</div>`;
       if (/sessão|session|autentic/i.test(error.message)) clearSession();
     }
   }
@@ -1938,7 +1900,7 @@
   function hydrateUserPhotos(list) {
     const ids = list.filter(item => item.has_photo && !userPhotos.has(item.id)).map(item => item.id).slice(0, 50);
     if (!ids.length) return Promise.resolve();
-    return api('getUserPhotos', {ids}).then(result => {
+    return api('getUserPhotos', {ids}, {silent:true}).then(result => {
       Object.entries(result.photos || {}).forEach(([id, photo]) => {
         if (photo.photo_data_url) userPhotos.set(id, photo.photo_data_url);
       });
@@ -2351,20 +2313,20 @@
   async function start() {
     if (!token || !API) return clearSession();
     try {
-      user = await api('validateSession');
+      const initial = await api('panelBootstrap');
+      user = initial.user;
       sessionStorage.setItem('solo_user', JSON.stringify(user));
       paintIdentity();
       paintAccess();
-      if (user.perfil === 'admin') {
-        try { users = await api('listUsers'); } catch (_) {}
-      }
-      await loadOwnPhoto();
-      const firstPage = ['dashboard','orders','finance','users','clients','suppliers','products','kits','coupons','site_menu','settings'].find(canAccess);
-      if (firstPage) navigate(firstPage);
+      panelTransport.prime(initial.reads,initial.results);
+      const firstPage = initial.page;
+      if (firstPage) await navigate(firstPage);
+
       else {
         document.querySelector('#page-title').textContent = 'Acesso restrito';
         workspace.innerHTML = '<div class="workspace-state">Nenhum módulo liberado. Solicite acesso ao administrador. Seu perfil continua disponível no canto superior.</div>';
       }
+      void loadOwnPhoto().catch(()=>{});
     } catch (_) {
       clearSession();
     }

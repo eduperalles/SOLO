@@ -18,7 +18,7 @@ function doGet(event) {
   if (action === 'recordVisit' || action === 'getDailyVisits') {
     return json_({ ok: true, data: handleDailyVisits_(action === 'recordVisit') });
   }
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,kits:1,productMeasures:1,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,panelReads:1,kits:1,productMeasures:1,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -54,10 +54,25 @@ function handleDailyVisits_(isRecord) {
   }
 }
 
+let PANEL_READ_MEMO_ = null;
+function panelMemo_(key, read) {
+  if (!PANEL_READ_MEMO_) return read();
+  if (!Object.prototype.hasOwnProperty.call(PANEL_READ_MEMO_,key)) PANEL_READ_MEMO_[key] = read();
+  return PANEL_READ_MEMO_[key];
+}
 function dispatch_(request) {
+  const previous = PANEL_READ_MEMO_;
+  PANEL_READ_MEMO_ = ['panelRead','panelBootstrap'].includes(request.action) ? {} : null;
+  try { return dispatchAction_(request); } finally { PANEL_READ_MEMO_ = previous; }
+}
+function dispatchAction_(request, trustedActor) {
   const publicActions = ['login','placeOrder','requestCustomerCode','verifyCustomerCode','customerOrders','customerLogout','getSiteMenuData','submitBudgetRequest','validateCoupon','recordVisit','getDailyVisits'];
-  const actor = publicActions.includes(request.action) ? null : auth_(request.token);
+  const actor = trustedActor || (publicActions.includes(request.action) ? null : auth_(request.token));
   switch (request.action) {
+    case 'getDashboardStats': return getDashboardStats_(actor);
+    case 'getDriveInventory': return getDriveInventory_(actor);
+    case 'panelRead': return panelRead_(actor,request.reads);
+    case 'panelBootstrap': return panelBootstrap_(actor);
     case 'recordVisit': return handleDailyVisits_(true);
     case 'getDailyVisits': return handleDailyVisits_(false);
     case 'placeOrder': return placeOrder_(request);
@@ -173,7 +188,8 @@ function setupSettings() {
   });
 }
 
-function readAccess_() {
+function readAccess_() { return panelMemo_('access',()=>readAccessFresh_()); }
+function readAccessFresh_() {
   const id = PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID');
   if (!id) throw Error('Configurações não inicializadas. Execute setupSettings.');
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
@@ -1019,7 +1035,8 @@ function financeFileId_(type) {
   return id;
 }
 
-function readFinance_(type) {
+function readFinance_(type) { return panelMemo_('finance:'+type,()=>readFinanceFresh_(type)); }
+function readFinanceFresh_(type) {
   const text = DriveApp.getFileById(financeFileId_(type)).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   if (!text.trim()) return [];
   const matrix = Utilities.parseCsv(text);
@@ -1296,7 +1313,8 @@ function photoFile_(user) {
   return file;
 }
 
-function readUsers_() {
+function readUsers_() { return panelMemo_('users',()=>readUsersFresh_()); }
+function readUsersFresh_() {
   const id = PropertiesService.getScriptProperties().getProperty('USERS_FILE_ID');
   if (!id) throw Error('Drive ainda não configurado. Execute setupSolo.');
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
@@ -1727,4 +1745,53 @@ function deleteKit_(actor,id,version) {
     if (selected.foto_arquivo_id) try {DriveApp.getFileById(selected.foto_arquivo_id).setTrashed(true);} catch (_) {}
     return {deleted:true};
   });
+}
+
+// Leituras agrupadas: autenticação e permissões atuais em toda requisição.
+const PANEL_READ_ACTIONS_ = ['getDashboardStats','getDriveInventory','validateSession','listUsers','listClients','listSuppliers','listProducts','listKits','listKitProducts','listCoupons','listOrders','listFinanceReceivables','listFinancePayables','getSiteMenuAdmin','getModuleAccess','getMyProfile','getMyProfilePhoto','getUserPhotos'];
+function panelRead_(actor, reads) {
+  if (!Array.isArray(reads) || !reads.length || reads.length > 20 || reads.some(read=>!read || !PANEL_READ_ACTIONS_.includes(read.action))) throw Error('Consulta agrupada inválida.');
+  const user = publicUser_(actor);
+  const results = reads.map(read=>{
+    try { return {ok:true,data:dispatchAction_({...(read.payload || {}),action:read.action},actor)}; }
+    catch(error) { return {ok:false,message:publicError_(error)}; }
+  });
+  return {user,results};
+}
+function panelBootstrap_(actor) {
+  const grants=access_(actor);
+  const page=['dashboard','orders','finance','users','clients','suppliers','products','kits','coupons','site_menu','settings'].find(key=>grants[key]) || '';
+  const actions=[];
+  if(page==='dashboard') {
+    actions.push('getDashboardStats');
+    if(grants.finance) actions.push('listFinanceReceivables','listFinancePayables');
+    if(grants.clients) actions.push('listClients');
+    if(grants.orders) actions.push('listOrders');
+  } else {
+    const pages={orders:['listOrders'],finance:['listFinanceReceivables','listFinancePayables'],users:['listUsers'],clients:['listClients'],suppliers:['listSuppliers'],products:['listProducts',...(grants.suppliers ? ['listSuppliers'] : [])],kits:['listKits','listKitProducts'],coupons:['listCoupons',...(grants.clients ? ['listClients'] : [])],site_menu:['getSiteMenuAdmin'],settings:['listUsers']};
+    actions.push(...(pages[page] || []));
+  }
+  const reads=actions.map(action=>({action}));
+  const result=reads.length ? panelRead_(actor,reads) : {user:publicUser_(actor),results:[]};
+  return {...result,page,reads};
+}
+
+function getDashboardStats_(actor) {
+  module_(actor,'dashboard');
+  const grants=access_(actor);
+  return {users:grants.users ? readUsers_().length : null,kits:grants.kits ? readKits_().length : null,products:grants.products ? readProducts_().length : null,modules:Object.values(grants).filter(Boolean).length};
+}
+function getDriveInventory_(actor) {
+  admin_(actor);
+  const props=PropertiesService.getScriptProperties();
+  const keys=['USERS_FILE_ID','SETTINGS_FILE_ID','CLIENTS_FILE_ID','SUPPLIERS_FILE_ID','PRODUCTS_FILE_ID','KITS_FILE_ID','COUPONS_FILE_ID','MENU_CONFIG_FILE_ID','MENU_CARDS_FILE_ID','ORDERS_FILE_ID','RECEIVABLES_FILE_ID','PAYABLES_FILE_ID'];
+  const propertyById={};keys.forEach(key=>{const id=props.getProperty(key);if(id)propertyById[id]=key;});
+  const files=DriveApp.getFolderById(DRIVE_FOLDER_ID_).getFiles(), rows=[];
+  while(files.hasNext()) {
+    const file=files.next(), name=file.getName();
+    if(!/\.csv$/i.test(name)) continue;
+    let bytes=null;try{bytes=Number(file.getSize());}catch(_){}
+    rows.push({name,property:propertyById[file.getId()] || '',bytes,status:bytes===null ? 'unavailable' : 'ok'});
+  }
+  return rows.sort((a,b)=>a.name.localeCompare(b.name));
 }

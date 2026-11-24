@@ -2,6 +2,7 @@
   const tools = window.SoloKitTools;
   const number = value => Number(value).toLocaleString('pt-BR',{maximumFractionDigits:3});
   async function mount({api,workspace,toast,escapeHtml:e,money,readAndResizeImage,isActive}) {
+    let selectedProductId='';
     let kits=[], products=[], editing=null, items=[], photo='', removePhoto=false, photoBusy=false, saving=false;
     workspace.innerHTML='<div class="workspace-state">Carregando kits e produtos…</div>';
     try {
@@ -10,8 +11,7 @@
     } catch(error) { if(isActive()) workspace.innerHTML=`<div class="workspace-state">${e(error.message)}</div>`; return; }
     const draft = () => { const form=workspace.querySelector('#kit-form'); return form ? {titulo:form.elements.titulo.value,descricao:form.elements.descricao.value} : {}; };
     function composition() {
-      const activeProducts=products.filter(p=>p.status === 'ativo');
-      workspace.querySelector('#kit-picker').innerHTML=`<option value="">Selecione um produto cadastrado…</option>${activeProducts.filter(p=>!items.some(i=>i.produto_id===p.id)).map(p=>`<option value="${e(p.id)}">${e(p.nome)} — ${number(p.quantidade || 1)} ${e(p.unidade_medida || 'un')} · ${money(p.preco_custo)} / ${money(p.preco_venda)}</option>`).join('')}`;
+      workspace.querySelector('#kit-picker').value=products.find(p=>p.id===selectedProductId)?.nome || '';
       workspace.querySelector('#kit-lines').innerHTML=items.length ? items.map((item,i)=>{
         const p=products.find(p=>p.id===item.produto_id);
         if(!p) return `<div class="kit-line"><b>Produto indisponível: ${e(item.nome || item.produto_id)}</b><button type="button" class="tiny-button danger" data-kit-remove="${i}">Remover</button></div>`;
@@ -22,6 +22,15 @@
       workspace.querySelectorAll('[data-kit-unit]').forEach(input=>input.addEventListener('change',()=>{items[Number(input.dataset.kitUnit)].unidade_medida=input.value; totals();}));
       workspace.querySelectorAll('[data-kit-remove]').forEach(button=>button.addEventListener('click',()=>{items.splice(Number(button.dataset.kitRemove),1);composition();}));
       totals();
+    }
+    function openProductPicker() {
+      const dialog=document.createElement('dialog');dialog.className='user-picker';dialog.setAttribute('aria-labelledby','kit-product-picker-title');
+      dialog.innerHTML=`<div class="card-head"><h2 id="kit-product-picker-title">Selecionar produto do kit</h2><button type="button" class="tiny-button" id="kit-picker-close">Fechar</button></div><div class="field"><label for="kit-product-search">Buscar por produto, categoria ou fornecedor</label><input id="kit-product-search" type="search" placeholder="Digite para buscar…"></div><div class="picker-results" id="kit-product-results"></div>`;
+      document.body.append(dialog);
+      const search=dialog.querySelector('#kit-product-search'),results=dialog.querySelector('#kit-product-results');
+      const render=()=>{const query=search.value.trim().toLocaleLowerCase('pt-BR');const found=products.filter(p=>p.status==='ativo' && !items.some(item=>item.produto_id===p.id) && `${p.nome} ${p.categoria} ${p.fornecedor_nome}`.toLocaleLowerCase('pt-BR').includes(query));results.innerHTML=found.length ? found.map(p=>`<button type="button" class="picker-user" data-kit-pick="${e(p.id)}"><span><b>${e(p.nome)}</b><small>${number(p.quantidade || 1)} ${e(p.unidade_medida || 'un')} · ${e(p.fornecedor_nome || p.categoria || '')}</small><small>Custo ${money(p.preco_custo)} · Venda ${money(p.preco_venda)}</small></span><span class="badge">Selecionar</span></button>`).join('') : '<div class="empty">Nenhum produto disponível. Produtos já adicionados não se repetem.</div>';};
+      search.oninput=render;results.onclick=event=>{const button=event.target.closest('[data-kit-pick]');if(!button)return;selectedProductId=button.dataset.kitPick;workspace.querySelector('#kit-picker').value=products.find(p=>p.id===selectedProductId).nome;dialog.close();workspace.querySelector('#kit-add-product').focus();};
+      dialog.querySelector('#kit-picker-close').onclick=()=>dialog.close();dialog.addEventListener('close',()=>dialog.remove(),{once:true});render();dialog.showModal();search.focus();
     }
     function totals() {
       if (!workspace.querySelector('#kit-calculation-error')) return;
@@ -38,16 +47,17 @@
       <form class="editor" id="kit-form"><div class="field full"><label for="kit-title">Título do kit *</label><input id="kit-title" name="titulo" minlength="2" maxlength="180" value="${e(values.titulo || '')}" placeholder="Ex.: Kit Café com Afeto" required></div>
       <div class="field full"><label for="kit-description">Descrição e orientações de montagem</label><textarea id="kit-description" name="descricao" maxlength="4000" rows="3" placeholder="Descreva a apresentação e os cuidados para montar este kit.">${e(values.descricao || '')}</textarea></div>
       <div class="field full"><label for="kit-photo">Foto do kit</label><div class="product-photo-row"><div id="kit-photo-preview">${photo || editing?.foto_url ? `<img src="${e(photo || editing.foto_url)}" alt="Foto do kit" class="kit-photo-preview">` : '<div class="kit-photo-placeholder">▣</div>'}</div><div><input type="file" id="kit-photo" accept="image/jpeg,image/png,image/webp"><button type="button" id="kit-photo-remove" class="tiny-button danger">Remover foto</button><small class="helper">Imagem salva no Google Drive, na pasta de fotos do projeto.</small></div></div></div>
-      <div class="field full"><label for="kit-picker">Produtos que compõem o kit *</label><div class="kit-add"><select id="kit-picker"></select><button type="button" class="button" id="kit-add-product">Adicionar produto</button></div><small class="helper">Use as quantidades da montagem. Ex.: produto cadastrado por 1 kg, kit com 100 g = 10% do preço.</small></div>
+      <div class="field full"><label for="kit-picker">Produtos que compõem o kit *</label><div class="kit-add"><div class="settings-selector"><input id="kit-picker" placeholder="Clique na lupa para selecionar um produto" readonly><button type="button" class="button" id="kit-find-product" aria-label="Buscar produto"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button></div><button type="button" class="button" id="kit-add-product">Adicionar produto</button></div><small class="helper">Use as quantidades da montagem. Ex.: produto cadastrado por 1 kg, kit com 100 g = 10% do preço.</small></div>
       <div class="field full" id="kit-lines"></div><div id="kit-calculation-error" class="field full kit-error" role="status"></div>
       <div class="field full"><div class="kit-totals">${[['preco_custo','Custo total'],['preco_venda','Venda total'],['lucro','Lucro bruto'],['margem_lucro','Margem de lucro']].map(([key,label])=>`<div class="dash-metric-pill"><span>${label}</span><strong id="kit-total-${key}"></strong></div>`).join('')}</div><small class="helper">Margem = (venda − custo) ÷ venda × 100. Frete, impostos e despesas operacionais não estão incluídos. Ao salvar, os preços atuais dos produtos ficam registrados na ficha do kit.</small></div>
       <div class="form-actions"><button type="button" class="button button-secondary" id="kit-clear">Novo kit</button><button class="button" type="submit" id="kit-save">Salvar kit</button></div></form></section>`;
       workspace.querySelector('#kit-records-tab').onclick=()=>{if(photoBusy)return;const current=draft(); records(()=>editor(current));};
       workspace.querySelector('#kit-clear').onclick=()=>{if(photoBusy)return;editing=null;items=[];photo='';removePhoto=false;editor();};
+      workspace.querySelector('#kit-find-product').onclick=openProductPicker;
       workspace.querySelector('#kit-add-product').onclick=()=>{
-        const p=products.find(p=>p.id === workspace.querySelector('#kit-picker').value);
+        const p=products.find(p=>p.id === selectedProductId);
         if(!p) {toast('Selecione um produto.',true);return;}
-        items.push({produto_id:p.id,quantidade:Number(p.quantidade || 1),unidade_medida:p.unidade_medida || 'un'}); composition();
+        items.push({produto_id:p.id,quantidade:Number(p.quantidade || 1),unidade_medida:p.unidade_medida || 'un'}); selectedProductId='';composition();
       };
       workspace.querySelector('#kit-photo').onchange=async event=>{
         const file=event.target.files?.[0];if(!file)return;
