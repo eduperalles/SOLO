@@ -3,12 +3,12 @@ const USERS_COLUMNS_ = ['id','nome','email','senha_hash','salt','perfil','status
 const FINANCE_COLUMNS_ = ['id','descricao','pessoa','categoria','valor','data_vencimento','data_pagamento','status','observacoes','criado_em','atualizado_em','cliente_id','pedido_id'];
 const CLIENT_COLUMNS_ = ['id','nome','email','whatsapp','data_cadastro','criado_em','atualizado_em'];
 const SUPPLIER_COLUMNS_ = ['id','fornecedor','email','whatsapp','endereco','cidade','uf','tipo_produto','observacoes','criado_em','atualizado_em'];
-const PRODUCT_COLUMNS_ = ['id','nome','categoria','fornecedor_id','fornecedor_nome','preco_custo','preco_venda','margem_lucro','foto_arquivo_id','descricao','status','criado_em','atualizado_em'];
+const PRODUCT_COLUMNS_ = ['quantidade','unidade_medida','id','nome','categoria','fornecedor_id','fornecedor_nome','preco_custo','preco_venda','margem_lucro','foto_arquivo_id','descricao','status','criado_em','atualizado_em'];
 const COUPON_COLUMNS_ = ['id','codigo','desconto_valor','tipo','valor_minimo','cliente_id','cliente_nome','limite_usos','usos_atuais','validade','status','criado_em','atualizado_em'];
 const MENU_CONFIG_COLUMNS_ = ['id','menu_titulo','secao_titulo','secao_subtitulo','ativo','atualizado_em'];
 const MENU_CARD_COLUMNS_ = ['id','titulo','descricao','fotos_json','ordem','ativo','criado_em','atualizado_em'];
-const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','products','coupons','site_menu','orders','finance','atualizado_em','atualizado_por'];
-const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'products',name:'Produtos'},{id:'coupons',name:'Cupons'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
+const ACCESS_COLUMNS_ = ['usuario_id','dashboard','users','clients','suppliers','products','kits','coupons','site_menu','orders','finance','atualizado_em','atualizado_por'];
+const MODULES_ = [{id:'dashboard',name:'Visão geral'},{id:'users',name:'Usuários'},{id:'clients',name:'Clientes'},{id:'suppliers',name:'Fornecedores'},{id:'products',name:'Produtos'},{id:'kits',name:'Kits'},{id:'coupons',name:'Cupons'},{id:'site_menu',name:'Menu Site'},{id:'orders',name:'Pedidos'},{id:'finance',name:'Financeiro'},{id:'settings',name:'Configurações',adminOnly:true}];
 const SESSION_SECONDS = 21600;
 const HASH_ROUNDS = 10000;
 
@@ -18,7 +18,7 @@ function doGet(event) {
   if (action === 'recordVisit' || action === 'getDailyVisits') {
     return json_({ ok: true, data: handleDailyVisits_(action === 'recordVisit') });
   }
-  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
+  return json_({ok:true,data:{service:'SOLO admin API',configured:!!props.getProperty('USERS_FILE_ID'),moduleAccess:3,kits:1,productMeasures:1,orders:!!props.getProperty('ORDERS_FILE_ID'),customerPortal:1,clients:!!props.getProperty('CLIENTS_FILE_ID'),suppliers:!!props.getProperty('SUPPLIERS_FILE_ID'),products:!!props.getProperty('PRODUCTS_FILE_ID'),coupons:!!props.getProperty('COUPONS_FILE_ID'),siteMenu:!!props.getProperty('MENU_CONFIG_FILE_ID'),settings:!!props.getProperty('SETTINGS_FILE_ID')}});
 }
 
 function doPost(event) {
@@ -89,6 +89,11 @@ function dispatch_(request) {
     case 'createSupplier': return saveSupplier_(actor, request.record || {}, 'create');
     case 'updateSupplier': return saveSupplier_(actor, request.record || {}, 'update');
     case 'deleteSupplier': return deleteSupplier_(actor, request.id, request.version);
+    case 'listKits': module_(actor, 'kits'); return readKits_();
+    case 'listKitProducts': module_(actor, 'kits'); return readProducts_();
+    case 'createKit': return saveKit_(actor, request.record || {}, 'create');
+    case 'updateKit': return saveKit_(actor, request.record || {}, 'update');
+    case 'deleteKit': return deleteKit_(actor, request.id, request.version);
     case 'listProducts': module_(actor, 'products'); return readProducts_();
     case 'createProduct': return saveProduct_(actor, request.record || {}, 'create');
     case 'updateProduct': return saveProduct_(actor, request.record || {}, 'update');
@@ -174,15 +179,15 @@ function readAccess_() {
   const text = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/, '');
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','products','coupons','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
+  if (ACCESS_COLUMNS_.filter(key => !['clients','suppliers','products','kits','coupons','site_menu','orders'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de configuracoes.csv inválido.');
   return matrix.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((key, index) => [key,row[index] || ''])));
 }
 
 function access_(user, rows) {
-  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,products:true,coupons:true,site_menu:true,orders:true,finance:true,settings:true};
+  if (user.perfil === 'admin') return {dashboard:true,users:true,clients:true,suppliers:true,products:true,kits:true,coupons:true,site_menu:true,orders:true,finance:true,settings:true};
   const row = (rows || readAccess_()).find(row => row.usuario_id === user.id);
   // Preserva o acesso anterior até o administrador configurar o usuário.
-  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',products:!!row && row.products === '1',coupons:!!row && row.coupons === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
+  return {dashboard:row ? row.dashboard === '1' : true,users:row ? row.users === '1' : false,clients:!!row && row.clients === '1',suppliers:!!row && row.suppliers === '1',products:!!row && row.products === '1',kits:!!row && row.kits === '1',coupons:!!row && row.coupons === '1',site_menu:!!row && row.site_menu === '1',orders:!!row && row.orders === '1',finance:row ? row.finance === '1' : true,settings:false};
 }
 
 function module_(actor, module) {
@@ -205,11 +210,11 @@ function saveModuleAccess_(actor, request) {
     if (!selected) throw Error('Usuário não encontrado.');
     if (selected.perfil === 'admin') throw Error('Administradores mantêm acesso integral.');
     const input = request.access;
-    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','products','coupons','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
+    if (!input || ['dashboard','finance','users'].some(key => typeof input[key] !== 'boolean') || Object.keys(input).some(key => !['dashboard','finance','users','clients','suppliers','products','kits','coupons','site_menu','orders'].includes(key)) || Object.values(input).some(value => typeof value !== 'boolean')) throw Error('Permissões inválidas.');
     const rows = readAccess_();
     const index = rows.findIndex(row => row.usuario_id === selected.id);
     if (String(request.version || '') !== (index < 0 ? '' : rows[index].atualizado_em)) throw Error('Permissões atualizadas por outra sessão. Selecione o usuário novamente.');
-    const next = {orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',products:input.products === undefined ? (index < 0 ? '0' : rows[index].products || '0') : input.products ? '1' : '0',coupons:input.coupons === undefined ? (index < 0 ? '0' : rows[index].coupons || '0') : input.coupons ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
+    const next = {kits:input.kits === undefined ? (index < 0 ? '0' : rows[index].kits || '0') : input.kits ? '1' : '0',orders:input.orders === undefined ? (index < 0 ? '0' : rows[index].orders || '0') : input.orders ? '1' : '0',usuario_id:selected.id,dashboard:input.dashboard ? '1' : '0',users:input.users ? '1' : '0',finance:input.finance ? '1' : '0',clients:input.clients === undefined ? (index < 0 ? '0' : rows[index].clients || '0') : input.clients ? '1' : '0',suppliers:input.suppliers === undefined ? (index < 0 ? '0' : rows[index].suppliers || '0') : input.suppliers ? '1' : '0',products:input.products === undefined ? (index < 0 ? '0' : rows[index].products || '0') : input.products ? '1' : '0',coupons:input.coupons === undefined ? (index < 0 ? '0' : rows[index].coupons || '0') : input.coupons ? '1' : '0',site_menu:input.site_menu === undefined ? (index < 0 ? '0' : rows[index].site_menu || '0') : input.site_menu ? '1' : '0',atualizado_em:now_(),atualizado_por:actor.id};
     if (index < 0) rows.push(next); else rows[index] = next;
     DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty('SETTINGS_FILE_ID')).setContent(csv_(ACCESS_COLUMNS_, rows));
     return {access:access_(selected, rows),version:next.atualizado_em};
@@ -417,9 +422,11 @@ function readProducts_() {
   if (!text.trim()) return [];
   const matrix = Utilities.parseCsv(text);
   const headers = matrix.shift() || [];
-  if (PRODUCT_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de produtos.csv inválido.');
+  if (PRODUCT_COLUMNS_.filter(key => !['quantidade','unidade_medida'].includes(key)).some(key => !headers.includes(key))) throw Error('Cabeçalho de produtos.csv inválido.');
   return matrix.filter(r => r.some(Boolean)).map(r => {
     const item = Object.fromEntries(headers.map((k, i) => [k, r[i] || '']));
+    item.quantidade = Number(item.quantidade || 1);
+    item.unidade_medida = item.unidade_medida || 'un';
     item.foto_url = item.foto_arquivo_id ? 'https://drive.google.com/thumbnail?id=' + item.foto_arquivo_id + '&sz=w800' : '';
     item.preco_custo = Number(item.preco_custo || 0);
     item.preco_venda = Number(item.preco_venda || 0);
@@ -438,6 +445,10 @@ function saveProduct_(actor, input, operation) {
   const id = String(input.id || '');
   const nome = String(input.nome || '').trim();
   const categoria = String(input.categoria || 'Geral').trim();
+  const quantidade = Number(String(input.quantidade ?? 1).replace(',', '.'));
+  const unidade_medida = String(input.unidade_medida || 'un');
+  if (!Number.isFinite(quantidade) || quantidade <= 0 || quantidade > 1000000) throw Error('Informe uma quantidade maior que zero e até 1.000.000.');
+  if (!Object.prototype.hasOwnProperty.call(MEASURE_UNITS_,unidade_medida)) throw Error('Unidade de medida inválida.');
   const fornecedor_id = String(input.fornecedor_id || '').trim();
   const fornecedor_nome = String(input.fornecedor_nome || '').trim();
   const preco_custo = Number(String(input.preco_custo ?? '0').replace(',', '.'));
@@ -446,8 +457,8 @@ function saveProduct_(actor, input, operation) {
   const status = input.status === 'inativo' || input.status === false || input.status === '0' ? 'inativo' : 'ativo';
 
   if (nome.length < 2 || nome.length > 180) throw Error('Informe o nome do produto (2 a 180 caracteres).');
-  if (isNaN(preco_venda) || preco_venda <= 0) throw Error('O preço de venda deve ser maior que zero.');
-  if (isNaN(preco_custo) || preco_custo < 0) throw Error('O preço de custo não pode ser negativo.');
+  if (!Number.isFinite(preco_venda) || preco_venda <= 0) throw Error('O preço de venda deve ser maior que zero.');
+  if (!Number.isFinite(preco_custo) || preco_custo < 0) throw Error('O preço de custo não pode ser negativo.');
   if (categoria.length > 100) throw Error('A categoria deve conter até 100 caracteres.');
   if (descricao.length > 4000) throw Error('A descrição deve conter até 4.000 caracteres.');
 
@@ -486,6 +497,8 @@ function saveProduct_(actor, input, operation) {
       categoria,
       fornecedor_id,
       fornecedor_nome,
+      quantidade,
+      unidade_medida,
       preco_custo: preco_custo.toFixed(2),
       preco_venda: preco_venda.toFixed(2),
       margem_lucro,
@@ -513,6 +526,8 @@ function deleteProduct_(actor, id, version) {
     const selected = rows.find(r => r.id === String(id || ''));
     if (!selected) throw Error('Produto não encontrado.');
     if (String(version || '') !== selected.atualizado_em) throw Error('Produto atualizado por outra sessão. Atualize a lista antes de excluir.');
+
+    if (readKits_().some(kit => kit.itens.some(item => item.produto_id === selected.id))) throw Error('Este produto compõe um kit. Remova-o dos kits antes de excluir.');
 
     if (selected.foto_arquivo_id) {
       try { DriveApp.getFileById(selected.foto_arquivo_id).setTrashed(true); } catch (_) {}
@@ -1621,4 +1636,93 @@ function customerOrders_(request) {
 function customerLogout_(request) {
   CacheService.getScriptCache().remove('customer-session:' + digest_(String(request.token || '')));
   return {loggedOut:true};
+}
+// Quantidade cadastrada corresponde aos preços do produto. Conversões apenas na mesma dimensão.
+const MEASURE_UNITS_ = {g:['mass',1],kg:['mass',1000],mg:['mass',0.001],l:['volume',1000],ml:['volume',1],un:['unit',1],dz:['unit',12],pct:['package',1],cx:['box',1],m:['length',100],cm:['length',1]};
+const KIT_COLUMNS_ = ['id','titulo','descricao','foto_arquivo_id','itens_json','preco_custo','preco_venda','lucro','margem_lucro','criado_em','atualizado_em'];
+function getKitsFile_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('KITS_FILE_ID');
+  if (id) return DriveApp.getFileById(id);
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID_);
+  const found = folder.getFilesByName('kits.csv');
+  const file = found.hasNext() ? found.next() : folder.createFile('kits.csv',csv_(KIT_COLUMNS_,[]),'text/csv');
+  props.setProperty('KITS_FILE_ID',file.getId());
+  return file;
+}
+function kitView_(row) {
+  return {...row,itens:JSON.parse(row.itens_json || '[]'),preco_custo:Number(row.preco_custo),preco_venda:Number(row.preco_venda),lucro:Number(row.lucro),margem_lucro:Number(row.margem_lucro),foto_url:row.foto_arquivo_id ? 'https://drive.google.com/thumbnail?id='+encodeURIComponent(row.foto_arquivo_id)+'&sz=w1200' : ''};
+}
+function readKits_() {
+  const text = getKitsFile_().getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/,'');
+  if (!text.trim()) return [];
+  const matrix = Utilities.parseCsv(text), headers = matrix.shift() || [];
+  if (KIT_COLUMNS_.some(key => !headers.includes(key))) throw Error('Cabeçalho de kits.csv inválido.');
+  return matrix.filter(row=>row.some(Boolean)).map(row=>kitView_(Object.fromEntries(headers.map((key,i)=>[key,row[i] || '']))));
+}
+function calculateKit_(items, products) {
+  if (!Array.isArray(items) || !items.length || items.length > 100) throw Error('Adicione de 1 a 100 produtos ao kit.');
+  const seen = new Set();
+  const cents = value => Math.round((value + Number.EPSILON)*100);
+  const lines = items.map(input => {
+    const product = products.find(p=>p.id === String(input.produto_id || ''));
+    if (!product || product.status !== 'ativo') throw Error('Produto não encontrado ou inativo. Atualize a composição do kit.');
+    if (seen.has(product.id)) throw Error('Produto repetido. Ajuste a quantidade na mesma linha.');
+    seen.add(product.id);
+    const quantidade = Number(String(input.quantidade ?? '').replace(',','.'));
+    const unit = String(input.unidade_medida || product.unidade_medida || 'un');
+    const baseUnit = product.unidade_medida || 'un';
+    const a = MEASURE_UNITS_[unit], b = MEASURE_UNITS_[baseUnit];
+    if (!a || !b || a[0] !== b[0]) throw Error('Unidade incompatível com a quantidade cadastrada do produto.');
+    const baseQuantity = Number(product.quantidade || 1);
+    if (!Number.isFinite(quantidade) || quantidade <= 0 || quantidade > 1000000 || !Number.isFinite(baseQuantity) || baseQuantity <= 0) throw Error('Quantidade inválida na composição do kit.');
+    const factor = quantidade*a[1]/(baseQuantity*b[1]);
+    const custo = cents(Number(product.preco_custo)*factor)/100;
+    const venda = cents(Number(product.preco_venda)*factor)/100;
+    if (![custo,venda].every(Number.isFinite) || Math.max(custo,venda) > 99999999) throw Error('Valor da composição excede o limite.');
+    return {produto_id:product.id,nome:product.nome,quantidade,unidade_medida:unit,quantidade_base:baseQuantity,unidade_base:baseUnit,preco_custo:Number(product.preco_custo),preco_venda:Number(product.preco_venda),custo,venda};
+  });
+  const cost = lines.reduce((sum,item)=>sum+cents(item.custo),0)/100;
+  const sale = lines.reduce((sum,item)=>sum+cents(item.venda),0)/100;
+  const profit = cents(sale-cost)/100;
+  return {itens:lines,preco_custo:cost,preco_venda:sale,lucro:profit,margem_lucro:sale > 0 ? Math.round(profit/sale*10000)/100 : 0};
+}
+function saveKit_(actor,input,operation) {
+  module_(actor,'kits');
+  const titulo = String(input.titulo || '').trim(), descricao = String(input.descricao || '').trim();
+  if (titulo.length < 2 || titulo.length > 180) throw Error('Informe o título do kit (2 a 180 caracteres).');
+  if (descricao.length > 4000) throw Error('A descrição deve conter até 4.000 caracteres.');
+  return withLock_(()=>{
+    const rows = readKits_(), index = operation === 'update' ? rows.findIndex(row=>row.id === String(input.id || '')) : -1;
+    const old = rows[index];
+    if (operation === 'update' && !old) throw Error('Kit não encontrado.');
+    if (old && String(input.expected_updated_at || '') !== old.atualizado_em) throw Error('Kit atualizado por outra sessão. Reabra o cadastro antes de salvar.');
+    const calculated = calculateKit_(input.itens,readProducts_());
+    // Foto anterior só é descartada depois que o novo registro está salvo.
+    let photo = old ? old.foto_arquivo_id : '', created = null;
+    if (input.foto_data_url) {
+      const decoded = decodePhoto_(input.foto_data_url);
+      created = getProductsPhotosFolder_().createFile(Utilities.newBlob(decoded.bytes,decoded.mime,'kit-'+Utilities.getUuid()+'.'+decoded.extension));
+      try { created.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); } catch (_) {}
+      photo = created.getId();
+    } else if (input.remove_photo === true) photo = '';
+    const stamp = now_();
+    const row = {id:old ? old.id : Utilities.getUuid(),titulo,descricao,foto_arquivo_id:photo,itens_json:JSON.stringify(calculated.itens),preco_custo:calculated.preco_custo.toFixed(2),preco_venda:calculated.preco_venda.toFixed(2),lucro:calculated.lucro.toFixed(2),margem_lucro:calculated.margem_lucro.toFixed(2),criado_em:old ? old.criado_em : stamp,atualizado_em:stamp};
+    if (old) rows[index]=row; else rows.push(row);
+    try { getKitsFile_().setContent(csv_(KIT_COLUMNS_,rows)); }
+    catch (error) { if (created) try {created.setTrashed(true);} catch (_) {} throw error; }
+    if (old && old.foto_arquivo_id && old.foto_arquivo_id !== photo) try {DriveApp.getFileById(old.foto_arquivo_id).setTrashed(true);} catch (_) {}
+    return kitView_(row);
+  });
+}
+function deleteKit_(actor,id,version) {
+  module_(actor,'kits');
+  return withLock_(()=>{
+    const rows=readKits_(), selected=rows.find(row=>row.id === String(id || ''));
+    if (!selected) throw Error('Kit não encontrado.');
+    if (String(version || '') !== selected.atualizado_em) throw Error('Kit atualizado por outra sessão. Atualize a lista antes de excluir.');
+    getKitsFile_().setContent(csv_(KIT_COLUMNS_,rows.filter(row=>row.id !== selected.id)));
+    if (selected.foto_arquivo_id) try {DriveApp.getFileById(selected.foto_arquivo_id).setTrashed(true);} catch (_) {}
+    return {deleted:true};
+  });
 }

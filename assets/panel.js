@@ -28,7 +28,7 @@
   const canAccess = page => user?.access?.[page] === true;
   function paintAccess() {
     document.querySelectorAll('[data-page]').forEach(button => button.hidden = !canAccess(button.dataset.page));
-    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('products') && !canAccess('coupons') && !canAccess('site_menu');
+    document.querySelector('#registrations-menu').hidden = !canAccess('users') && !canAccess('clients') && !canAccess('suppliers') && !canAccess('products') && !canAccess('kits') && !canAccess('coupons') && !canAccess('site_menu');
   }
   let activePage = 'dashboard';
   let editingId = '';
@@ -84,6 +84,11 @@
       listUsers:'Carregando usuários',
       listClients:'Carregando clientes',
       listSuppliers:'Carregando fornecedores',
+      listKits:'Carregando kits',
+      listKitProducts:'Carregando composição',
+      createKit:'Salvando kit',
+      updateKit:'Salvando kit',
+      deleteKit:'Excluindo kit',
       listProducts:'Carregando produtos',
       createProduct:'Salvando produto',
       updateProduct:'Salvando produto',
@@ -202,18 +207,19 @@
       return;
     }
     activePage = page;
-    if (['users','clients','suppliers','products','coupons','site_menu'].includes(page)) {
+    if (['users','clients','suppliers','products','kits','coupons','site_menu'].includes(page)) {
       document.querySelector('#registrations-items').hidden = false;
       document.querySelector('#registrations-toggle').setAttribute('aria-expanded','true');
     }
-    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','products','coupons','site_menu'].includes(page));
+    document.querySelector('#registrations-toggle').classList.toggle('active', ['users','clients','suppliers','products','kits','coupons','site_menu'].includes(page));
     document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'products' ? 'Produtos' : page === 'coupons' ? 'Cupons' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
+    document.querySelector('#page-title').textContent = page === 'users' ? 'Usuários' : page === 'clients' ? 'Clientes' : page === 'suppliers' ? 'Fornecedores' : page === 'products' ? 'Produtos' : page === 'kits' ? 'Kits' : page === 'coupons' ? 'Cupons' : page === 'site_menu' ? 'Menu Site' : page === 'orders' ? 'Pedidos' : page === 'finance' ? 'Financeiro' : page === 'settings' ? 'Configurações' : 'Visão geral';
     setSidebarOpen(false);
     if (page === 'dashboard') void loadDashboardPage();
     else if (page === 'users') void loadUsersPage();
     else if (page === 'clients') void loadClientsPage();
     else if (page === 'suppliers') void loadSuppliersPage();
+    else if (page === 'kits') void window.SoloKits.mount({api,workspace,toast,escapeHtml,money,readAndResizeImage,isActive:()=>activePage === 'kits'});
     else if (page === 'products') void loadProductsPage();
     else if (page === 'coupons') void loadCouponsPage();
     else if (page === 'site_menu') void loadSiteMenuPage();
@@ -727,7 +733,7 @@
       const message = editor.querySelector('#access-message');
       button.disabled = true;
       try {
-        const access = Object.fromEntries(['dashboard','users','clients','suppliers','products','coupons','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
+        const access = Object.fromEntries(['dashboard','users','clients','suppliers','products','kits','coupons','site_menu','orders','finance'].map(key => [key,form.elements[key].checked]));
         const saved = await api('saveModuleAccess', {id:current.user.id,access,version:current.version});
         current.access = saved.access; current.version = saved.version;
         message.textContent = 'Permissões salvas com sucesso.';
@@ -960,8 +966,8 @@
   }
 
   function calcProfitMargin(costVal, priceVal) {
-    const cost = Number(parseCurrency(costVal)) || 0;
-    const price = Number(parseCurrency(priceVal)) || 0;
+    const cost = (typeof costVal === 'number' ? costVal : Number(parseCurrency(costVal))) || 0;
+    const price = (typeof priceVal === 'number' ? priceVal : Number(parseCurrency(priceVal))) || 0;
     const profit = price - cost;
     const margin = price > 0 ? (profit / price) * 100 : 0;
     return { cost, price, profit, margin };
@@ -1002,7 +1008,7 @@
     workspace.innerHTML = '<div class="workspace-state">Carregando produtos…</div>';
     try {
       const [prodRes, supRes] = await Promise.all([
-        api('listProducts').catch(() => []),
+        api('listProducts'),
         api('listSuppliers').catch(() => [])
       ]);
       if (activePage !== 'products') return;
@@ -1018,13 +1024,14 @@
     const query = filter.trim().toLocaleLowerCase('pt-BR');
     const visible = products.filter(p => `${p.nome} ${p.categoria} ${p.fornecedor_nome} ${p.descricao}`.toLocaleLowerCase('pt-BR').includes(query));
     if (!visible.length) return '<div class="empty">Nenhum produto encontrado.</div>';
-    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Foto</th><th>Produto</th><th>Categoria</th><th>Fornecedor</th><th>Custo</th><th>Venda</th><th>Margem</th><th>Ações</th></tr></thead><tbody>${visible.map(p => {
+    return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Foto</th><th>Produto</th><th>Quantidade / unidade</th><th>Categoria</th><th>Fornecedor</th><th>Custo</th><th>Venda</th><th>Margem</th><th>Ações</th></tr></thead><tbody>${visible.map(p => {
       const thumb = p.foto_url ? `<img src="${escapeHtml(p.foto_url)}" alt="" class="table-product-thumb" onerror="this.style.display='none'">` : '<div class="table-product-thumb" style="display:grid;place-items:center;color:var(--muted);font-size:18px;">🏷</div>';
       const profit = p.preco_venda - p.preco_custo;
       const marginBadgeClass = p.margem_lucro >= 30 ? '' : p.margem_lucro > 0 ? 'gold' : 'inactive';
       return `<tr>
         <td>${thumb}</td>
         <td><b>${escapeHtml(p.nome)}</b>${p.descricao ? `<small class="order-contact" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.descricao)}</small>` : ''}</td>
+        <td>${escapeHtml(Number(p.quantidade || 1).toLocaleString('pt-BR'))} ${escapeHtml(p.unidade_medida || 'un')}</td>
         <td><span class="badge">${escapeHtml(p.categoria || 'Geral')}</span></td>
         <td>${escapeHtml(p.fornecedor_nome || '—')}</td>
         <td>${money(p.preco_custo)}</td>
@@ -1055,7 +1062,6 @@
       <form id="product-form" class="editor">
         <input type="hidden" name="id" value="${escapeHtml(current?.id || '')}">
         <input type="hidden" name="expected_updated_at" value="${escapeHtml(current?.atualizado_em || '')}">
-        <input type="hidden" id="prod-fornecedor-nome" name="fornecedor_nome" value="${escapeHtml(current?.fornecedor_nome || '')}">
         
         <div class="field full"><label for="prod-nome">Nome do produto *</label><input id="prod-nome" name="nome" maxlength="180" minlength="2" value="${escapeHtml(current?.nome || '')}" placeholder="Ex: Tábua Brie com Favo de Mel" required></div>
         
@@ -1064,6 +1070,8 @@
           <div class="settings-selector"><input id="prod-fornecedor-nome" name="fornecedor_nome" value="${escapeHtml(current?.fornecedor_nome || '')}" placeholder="Clique na lupa para selecionar" readonly required><input type="hidden" id="prod-fornecedor-id" name="fornecedor_id" value="${escapeHtml(current?.fornecedor_id || '')}" required><button class="button" id="find-prod-supplier" type="button" aria-label="Buscar fornecedor">${searchIcon}</button></div>
         </div>
 
+        <div class="field"><label for="prod-quantity">Quantidade de referência *</label><input id="prod-quantity" name="quantidade" type="number" min="0.001" max="1000000" step="0.001" value="${escapeHtml(current?.quantidade || 1)}" required><small class="helper">Os preços abaixo correspondem a esta quantidade. Ex.: 1 kg ou 100 g.</small></div>
+        <div class="field"><label for="prod-unit">Unidade de medida *</label><select id="prod-unit" name="unidade_medida" required>${window.SoloKitTools.unitOptions(current?.unidade_medida || 'un')}</select></div>
         <div class="field"><label for="prod-custo">Preço de Custo (R$) *</label><input id="prod-custo" name="preco_custo" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.preco_custo)*100) : '')}" placeholder="0,00" required><small class="helper">Valor pago ao fornecedor pelo produto ou insumo.</small></div>
         <div class="field"><label for="prod-venda">Preço de Venda (R$) *</label><input id="prod-venda" name="preco_venda" type="text" inputmode="decimal" value="${escapeHtml(current ? maskCurrency(Number(current.preco_venda)*100) : '')}" placeholder="0,00" required><small class="helper">Preço de venda cobrado do cliente final.</small></div>
 
@@ -1199,6 +1207,8 @@
         expected_updated_at: fd.get('expected_updated_at') || '',
         nome: fd.get('nome'),
         categoria: fd.get('categoria'),
+        quantidade: Number(fd.get('quantidade')),
+        unidade_medida: fd.get('unidade_medida'),
         fornecedor_id: fd.get('fornecedor_id'),
         fornecedor_nome: fd.get('fornecedor_nome'),
         preco_custo: parseCurrency(fd.get('preco_custo')),
@@ -2349,7 +2359,7 @@
         try { users = await api('listUsers'); } catch (_) {}
       }
       await loadOwnPhoto();
-      const firstPage = ['dashboard','orders','finance','users','clients','settings'].find(canAccess);
+      const firstPage = ['dashboard','orders','finance','users','clients','suppliers','products','kits','coupons','site_menu','settings'].find(canAccess);
       if (firstPage) navigate(firstPage);
       else {
         document.querySelector('#page-title').textContent = 'Acesso restrito';
