@@ -1001,7 +1001,7 @@
     const visible = products.filter(p => `${p.nome} ${p.categoria} ${p.fornecedor_nome} ${p.descricao}`.toLocaleLowerCase('pt-BR').includes(query));
     if (!visible.length) return '<div class="empty">Nenhum produto encontrado.</div>';
     return `<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Foto</th><th>Produto</th><th>Quantidade / unidade</th><th>Categoria</th><th>Fornecedor</th><th>Custo</th><th>Venda</th><th>Margem</th><th>Ações</th></tr></thead><tbody>${visible.map(p => {
-      const thumb = p.foto_url ? `<img src="${escapeHtml(p.foto_url)}" alt="" class="table-product-thumb" onerror="this.style.display='none'">` : '<div class="table-product-thumb" style="display:grid;place-items:center;color:var(--muted);font-size:18px;">🏷</div>';
+      const thumb = p.foto_url ? `<button type="button" class="photo-preview-button" data-photo-preview data-photo-title="${escapeHtml(p.nome)}" aria-label="Ampliar foto de ${escapeHtml(p.nome)}"><img src="${escapeHtml(p.foto_url)}" alt="" class="table-product-thumb" onerror="this.parentElement.hidden=true"></button>` : '<div class="table-product-thumb" style="display:grid;place-items:center;color:var(--muted);font-size:18px;">🏷</div>';
       const profit = p.preco_venda - p.preco_custo;
       const marginBadgeClass = p.margem_lucro >= 30 ? '' : p.margem_lucro > 0 ? 'gold' : 'inactive';
       return `<tr>
